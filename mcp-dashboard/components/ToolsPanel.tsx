@@ -365,7 +365,7 @@ export default function ToolsPanel() {
 
             if (schemaType === 'integer' || schemaType === 'number') {
               return (
-                <FieldShell key={key} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
+                <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
                   <input
                     id={fieldId}
                     type="number"
@@ -379,7 +379,7 @@ export default function ToolsPanel() {
 
             if (schemaType === 'array') {
               return (
-                <FieldShell key={key} label={`${key}${required ? ' *' : ''} (JSON array)`} description={schema?.description}>
+                <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''} (JSON array)`} description={schema?.description}>
                   <textarea
                     id={fieldId}
                     rows={3}
@@ -395,7 +395,7 @@ export default function ToolsPanel() {
             }
 
             return (
-              <FieldShell key={key} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
+              <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
                 <textarea
                   id={fieldId}
                   rows={schema?.description?.toLowerCase().includes('pdb') ? 6 : 2}
@@ -463,17 +463,19 @@ function QuickButton({
 }
 
 function FieldShell({
+  fieldId,
   label,
   description,
   children,
 }: {
+  fieldId?: string
   label: string
   description?: string
   children: React.ReactNode
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-      <label className="mb-1.5 block text-sm font-medium text-slate-200">{label}</label>
+      <label htmlFor={fieldId} className="mb-1.5 block text-sm font-medium text-slate-200">{label}</label>
       {children}
       {description && <p className="mt-2 text-xs leading-5 text-slate-400">{description}</p>}
     </div>

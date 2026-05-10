@@ -104,7 +104,7 @@ export default function ServiceStatus() {
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
+    <div data-testid="service-status-panel" className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="text-xl font-semibold text-white">Service Status</h3>
@@ -133,12 +133,12 @@ export default function ServiceStatus() {
       )}
 
       {status && (
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {Object.entries(status).map(([service, info]) => (
-            <div key={service} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+            <div key={service} data-testid={`service-card-${service}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{service}</p>
+                  <p className="text-sm font-semibold text-white break-words">{service}</p>
                   <p className="mt-1 text-xs text-slate-500 break-all">{info.url}</p>
                 </div>
                 <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyles(info.status)}`}>
