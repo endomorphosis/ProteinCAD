@@ -80,6 +80,8 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
+// Fallback for tan(fov / 2) using a 60° camera field-of-view if the computed tangent is invalid.
+const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 
 function residueKey(chain: string, residueNum: number) {
   return `${chain || '_'}:${residueNum}`
@@ -666,7 +668,8 @@ export default function ProteinViewer3D({
     const maxDim = Math.max(size.x, size.y, size.z, 1)
     const fov = THREE.MathUtils.degToRad(camera.fov)
     const tangent = Math.tan(fov / 2)
-    const safeTangent = Number.isFinite(tangent) && tangent > 0.001 ? tangent : 0.577
+    const safeTangent =
+      Number.isFinite(tangent) && tangent > 0.001 ? tangent : DEFAULT_CAMERA_TAN_HALF_FOV
     const distance = (maxDim / 2) / safeTangent
 
     camera.position.set(center.x + distance * 0.35, center.y + distance * 0.25, center.z + distance * 1.35)

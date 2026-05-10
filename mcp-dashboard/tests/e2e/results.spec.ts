@@ -187,7 +187,7 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-focus-button').click()
 
     const modalBox = await page.getByTestId('viewer-modal').boundingBox()
-    expect(modalBox?.width || 0).toBeGreaterThan(1000)
+    expect(modalBox?.width || 0).toBeGreaterThan((page.viewportSize()?.width || 0) * 0.75)
     await expect(page.getByText(/Focused on residue A:2/i)).toBeVisible()
     await expect(page.getByText('A:2 GLY ×')).toBeVisible()
     await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('A:2 GLY')
