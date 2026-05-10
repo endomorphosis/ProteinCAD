@@ -604,8 +604,10 @@ export default function ProteinViewer3D({
   const moleculeRef = useRef<THREE.Group | null>(null)
   const residueCentersRef = useRef<Map<string, THREE.Vector3>>(new Map())
   const analysisRibbonRef = useRef<HTMLDivElement | null>(null)
+  const selectionSpotlightRef = useRef<HTMLDivElement | null>(null)
   const workflowSummaryRef = useRef<HTMLElement | null>(null)
   const selectedResiduesRef = useRef<HTMLElement | null>(null)
+  const residueInspectorRef = useRef<HTMLElement | null>(null)
   const variantSectionRef = useRef<HTMLElement | null>(null)
   const variantResultsRef = useRef<HTMLElement | null>(null)
 
@@ -878,7 +880,7 @@ export default function ProteinViewer3D({
     window.setTimeout(() => {
       const scrollTarget =
         typeof window !== 'undefined' && window.innerWidth < 1024
-          ? analysisRibbonRef.current || workflowSummaryRef.current
+          ? selectionSpotlightRef.current || analysisRibbonRef.current || workflowSummaryRef.current
           : workflowSummaryRef.current || analysisRibbonRef.current
       scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 0)
@@ -928,6 +930,17 @@ export default function ProteinViewer3D({
 
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     setAnalysisMessage('Jumped to the detailed analysis workspace.')
+  }
+
+  const scrollToResidueInspector = () => {
+    const target = residueInspectorRef.current || selectedResiduesRef.current
+    if (!target) {
+      setAnalysisMessage('Residue inspection panels are not available for this structure.')
+      return
+    }
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setAnalysisMessage('Jumped to the residue inspector workspace.')
   }
 
   const scrollToVariantResults = () => {
@@ -1429,6 +1442,92 @@ export default function ProteinViewer3D({
               />
             </div>
 
+            {selectionSummary && (
+              <div
+                ref={selectionSpotlightRef}
+                data-testid="viewer-selection-spotlight"
+                className="border-b border-emerald-400/10 bg-emerald-500/10 px-4 py-3"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-100">
+                        Selection spotlight
+                      </div>
+                      <div
+                        data-testid="viewer-selection-spotlight-primary"
+                        className="mt-1 text-base font-semibold text-white"
+                      >
+                        {formatResidueSelection(selectionSummary.primary)}
+                      </div>
+                      <div className="mt-1 text-xs text-emerald-100/80">
+                        Keep the latest residue context visible while exploring the structure.
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-white/10 bg-slate-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-50">
+                      {selectionSummary.count} selected
+                    </span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <InspectorStat
+                      label="Atom count"
+                      value={String(selectionSummary.primary.atomCount)}
+                      testId="viewer-selection-spotlight-atom-count"
+                    />
+                    <InspectorStat
+                      label="Avg B-factor"
+                      value={selectionSummary.primary.avgBFactor.toFixed(1)}
+                      testId="viewer-selection-spotlight-bfactor"
+                    />
+                    <InspectorStat
+                      label="Sequence residue"
+                      value={selectionSummary.primary.sequenceResidue || 'n/a'}
+                      testId="viewer-selection-spotlight-sequence"
+                    />
+                    <InspectorStat
+                      label="Selected range"
+                      value={selectionSummary.ranges}
+                      testId="viewer-selection-spotlight-range"
+                    />
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap">
+                    <button
+                      type="button"
+                      data-testid="viewer-selection-spotlight-center"
+                      onClick={focusSelection}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Center selection
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="viewer-selection-spotlight-copy"
+                      onClick={copySelectedResidues}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Copy residues
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="viewer-selection-spotlight-inspector"
+                      onClick={scrollToResidueInspector}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Open inspector
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="viewer-selection-spotlight-clear"
+                      onClick={clearSelection}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {workflowSummary && (
               <div
                 ref={analysisRibbonRef}
@@ -1891,6 +1990,7 @@ export default function ProteinViewer3D({
             </section>
 
             <section
+              ref={residueInspectorRef}
               data-testid="viewer-residue-inspector"
               className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4"
             >
