@@ -103,7 +103,7 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
-// Fallback half-FOV tangent used when the camera-derived tangent becomes non-finite or too small to frame safely.
+// Fallback half-FOV tangent (tan(30°) ≈ 0.577) used when camera-derived values are unavailable or too small.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
 const MAX_RENDERER_PIXEL_RATIO = 2
