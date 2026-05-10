@@ -110,7 +110,7 @@ function parsePDB(pdb: string): ParseResult {
       const chain = line.substring(21, 22).trim() || 'A'
       const bFactor = Number.parseFloat(line.substring(60, 66).trim()) || 0
 
-      if (![x, y, z, residueNum].every(Number.isFinite)) {
+      if (![x, y, z, residueNum].every(Number.isFinite) || residueNum <= 0) {
         malformedCount += 1
         continue
       }
@@ -583,7 +583,9 @@ export default function ProteinViewer3D({
     const size = box.getSize(new THREE.Vector3())
     const maxDim = Math.max(size.x, size.y, size.z, 1)
     const fov = THREE.MathUtils.degToRad(camera.fov)
-    const distance = (maxDim / 2) / Math.tan(fov / 2)
+    const tangent = Math.tan(fov / 2)
+    const safeTangent = Number.isFinite(tangent) && tangent > 0.001 ? tangent : 0.577
+    const distance = (maxDim / 2) / safeTangent
 
     camera.position.set(center.x + distance * 0.35, center.y + distance * 0.25, center.z + distance * 1.35)
     camera.near = Math.max(0.1, distance / 100)
@@ -623,15 +625,16 @@ export default function ProteinViewer3D({
       chain = match?.chain || ''
     }
 
-    if (!chain || !Number.isFinite(residueNum)) {
+    if (!chain || residueNum === null || !Number.isFinite(residueNum)) {
       setAnalysisMessage('Use formats like 42 or A:42.')
       return
     }
 
-    const key = residueKey(chain, residueNum!)
+    const resolvedResidueNum = Math.floor(residueNum)
+    const key = residueKey(chain, resolvedResidueNum)
     const center = residueCentersRef.current.get(key)
     if (!center) {
-      setAnalysisMessage(`Residue ${chain}:${residueNum} is not present in the visible structure.`)
+      setAnalysisMessage(`Residue ${chain}:${resolvedResidueNum} is not present in the visible structure.`)
       return
     }
 
@@ -649,17 +652,17 @@ export default function ProteinViewer3D({
         return prev
       }
       const residue = visibleResidues.find(
-        (item) => item.chain === chain && item.residueNum === residueNum
+        (item) => item.chain === chain && item.residueNum === resolvedResidueNum
       )
       const next = [
         ...prev,
-        { chain, residueNum: residueNum!, residue: residue?.residue || 'UNK' },
+        { chain, residueNum: resolvedResidueNum, residue: residue?.residue || 'UNK' },
       ]
       syncPositionsFromSelection(next)
       return next
     })
 
-    setAnalysisMessage(`Focused on residue ${chain}:${residueNum}.`)
+    setAnalysisMessage(`Focused on residue ${chain}:${resolvedResidueNum}.`)
   }
 
   const callProposeVariants = async () => {

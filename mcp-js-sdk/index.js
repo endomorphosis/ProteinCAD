@@ -10,7 +10,10 @@ function defaultBaseUrl() {
 function rpcPayload(method, params) {
   return {
     jsonrpc: '2.0',
-    id: `${method}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id:
+      typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${method}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     method,
     params,
   }

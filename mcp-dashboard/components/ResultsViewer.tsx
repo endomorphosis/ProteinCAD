@@ -121,7 +121,10 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   const calculateDuration = () => {
     const start = new Date(job.created_at).getTime()
     const end = new Date(job.updated_at).getTime()
-    const diff = Math.max(0, Math.floor((end - start) / 1000))
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      return 'Unavailable'
+    }
+    const diff = Math.floor((end - start) / 1000)
     const minutes = Math.floor(diff / 60)
     const seconds = diff % 60
     return `${minutes}m ${seconds}s`
