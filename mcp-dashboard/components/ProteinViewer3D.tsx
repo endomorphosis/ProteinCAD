@@ -56,6 +56,16 @@ type ChainSummary = {
   residueRange: string
 }
 
+type SequenceMapEntry = {
+  chain: string
+  residueNum: number
+  residue: string
+  sequenceResidue?: string
+  avgBFactor: number
+  isSelected: boolean
+  isHotspot: boolean
+}
+
 type BuildResult = {
   group: THREE.Group
   residueCenters: Map<string, THREE.Vector3>
@@ -682,6 +692,33 @@ export default function ProteinViewer3D({
     [parsed.chains, parsed.residues, selectedResidues]
   )
 
+  const hotspotKeys = useMemo(() => {
+    return new Set(
+      visibleResidues
+        .slice()
+        .sort((left, right) => right.avgBFactor - left.avgBFactor || left.residueNum - right.residueNum)
+        .slice(0, Math.min(5, visibleResidues.length))
+        .map((residue) => residue.key)
+    )
+  }, [visibleResidues])
+
+  const sequenceMapEntries = useMemo<SequenceMapEntry[]>(() => {
+    return visibleResidues.slice(0, 180).map((residue) => ({
+      chain: residue.chain,
+      residueNum: residue.residueNum,
+      residue: residue.residue,
+      sequenceResidue:
+        sequence && residue.residueNum >= 1 && residue.residueNum <= sequence.length
+          ? sequence[residue.residueNum - 1]
+          : undefined,
+      avgBFactor: residue.avgBFactor,
+      isSelected: selectedResidues.some(
+        (item) => item.chain === residue.chain && item.residueNum === residue.residueNum
+      ),
+      isHotspot: hotspotKeys.has(residue.key),
+    }))
+  }, [hotspotKeys, selectedResidues, sequence, visibleResidues])
+
   useEffect(() => {
     setSelectedResidues((prev) => {
       const next = prev.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain)
@@ -818,6 +855,27 @@ export default function ProteinViewer3D({
     )
   }
 
+  const focusSelectionEntry = (selection: ResidueSelection) => {
+    const controls = controlsRef.current
+    const camera = cameraRef.current
+    const center = residueCentersRef.current.get(residueKey(selection.chain, selection.residueNum))
+    if (!controls || !camera || !center) {
+      setAnalysisMessage(`Residue ${selection.chain}:${selection.residueNum} is not present in the visible structure.`)
+      return false
+    }
+
+    controls.target.copy(center)
+    camera.position.copy(center.clone().add(new THREE.Vector3(4, 4, 10)))
+    controls.update()
+    setAnalysisMessage(`Focused on residue ${selection.chain}:${selection.residueNum}.`)
+    return true
+  }
+
+  const selectSingleResidue = (selection: ResidueSelection) => {
+    applySelection([selection], `Selected residue ${selection.chain}:${selection.residueNum}.`)
+    focusSelectionEntry(selection)
+  }
+
   const downloadSnapshot = async () => {
     const renderer = rendererRef.current
     if (!renderer) {
@@ -879,31 +937,19 @@ export default function ProteinViewer3D({
       return
     }
 
-    const controls = controlsRef.current
-    const camera = cameraRef.current
-    if (!controls || !camera) return
-
-    const offset = new THREE.Vector3(4, 4, 10)
-    controls.target.copy(center)
-    camera.position.copy(center.clone().add(offset))
-    controls.update()
+    const residue = visibleResidues.find((item) => item.chain === chain && item.residueNum === resolvedResidueNum)
+    const selection = { chain, residueNum: resolvedResidueNum, residue: residue?.residue || 'UNK' }
 
     setSelectedResidues((prev) => {
-      if (prev.some((residue) => residue.chain === chain && residue.residueNum === residueNum)) {
+      if (prev.some((item) => item.chain === selection.chain && item.residueNum === selection.residueNum)) {
         return prev
       }
-      const residue = visibleResidues.find(
-        (item) => item.chain === chain && item.residueNum === resolvedResidueNum
-      )
-      const next = [
-        ...prev,
-        { chain, residueNum: resolvedResidueNum, residue: residue?.residue || 'UNK' },
-      ]
+      const next = [...prev, selection]
       syncPositionsFromSelection(next)
       return next
     })
 
-    setAnalysisMessage(`Focused on residue ${chain}:${resolvedResidueNum}.`)
+    focusSelectionEntry(selection)
   }
 
   const callProposeVariants = async () => {
@@ -1148,8 +1194,8 @@ export default function ProteinViewer3D({
           </button>
         </div>
 
-        <div className="grid flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="flex min-h-0 min-w-0 flex-col border-b border-white/10 lg:border-b-0 lg:border-r">
+        <div className="flex flex-1 flex-col overflow-y-auto lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 border-b border-white/10 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r">
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
               {([
                 ['ribbon', 'Ribbon'],
@@ -1230,7 +1276,7 @@ export default function ProteinViewer3D({
               />
             </div>
 
-            <div className="min-h-[340px] flex-1 bg-slate-950/60 sm:min-h-[420px] lg:min-h-0">
+            <div className="h-[340px] bg-slate-950/60 sm:h-[420px] lg:min-h-0 lg:flex-1">
               {error ? (
                 <div className="flex h-full items-center justify-center px-6 text-center">
                   <div>
@@ -1244,7 +1290,7 @@ export default function ProteinViewer3D({
             </div>
           </div>
 
-          <aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto bg-slate-900/95 p-4">
+          <aside className="min-w-0 bg-slate-900/95 p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-y-auto">
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Structure controls</h4>
               <div className="mt-4 space-y-3">
@@ -1439,6 +1485,53 @@ export default function ProteinViewer3D({
                 </p>
               )}
             </section>
+
+            {sequenceMapEntries.length > 0 && (
+              <section data-testid="viewer-sequence-map" className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Sequence map</h4>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Click a residue token to focus and seed variant positions directly from sequence order.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                    {sequenceMapEntries.length} visible
+                  </span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {sequenceMapEntries.map((entry) => {
+                    const label = `${entry.chain}:${entry.residueNum}`
+                    const value = entry.sequenceResidue || entry.residue[0] || '?'
+                    const toneClass = entry.isSelected
+                      ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-50'
+                      : entry.isHotspot
+                        ? 'border-amber-400/30 bg-amber-400/15 text-amber-50'
+                        : 'border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/10'
+
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        data-testid={`viewer-sequence-token-${entry.chain}-${entry.residueNum}`}
+                        onClick={() =>
+                          selectSingleResidue({
+                            chain: entry.chain,
+                            residueNum: entry.residueNum,
+                            residue: entry.residue,
+                          })
+                        }
+                        className={`rounded-2xl border px-2.5 py-2 text-left transition ${toneClass}`}
+                        title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}`}
+                      >
+                        <div className="text-[11px] font-semibold uppercase tracking-wide">{label}</div>
+                        <div className="mt-1 text-sm font-semibold">{value}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
 
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-3">

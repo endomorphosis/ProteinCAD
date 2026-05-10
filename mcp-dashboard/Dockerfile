@@ -16,6 +16,7 @@ COPY . .
 
 # Disable telemetry during build
 ENV NEXT_TELEMETRY_DISABLED 1
+ENV MCP_DASHBOARD_STANDALONE 1
 
 RUN npm run build
 

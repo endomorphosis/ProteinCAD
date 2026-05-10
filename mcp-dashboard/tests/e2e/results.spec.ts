@@ -301,4 +301,25 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-chain-solo-B').click()
     await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('all')
   })
+
+  test('3D viewer sequence map focuses residues and stacks cleanly on mobile', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+    await page.setViewportSize({ width: 430, height: 1200 })
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    const canvasBox = await page.locator('canvas').boundingBox()
+    const sequenceMapBox = await page.getByTestId('viewer-sequence-map').boundingBox()
+    expect((sequenceMapBox?.y || 0)).toBeGreaterThanOrEqual((canvasBox?.y || 0) + (canvasBox?.height || 0) - 1)
+
+    await page.getByTestId('viewer-sequence-token-B-10').click()
+    await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('B:10 TYR')
+    await expect(page.getByTestId('variant-positions')).toHaveValue('10')
+    await expect(page.getByText(/Focused on residue B:10/i)).toBeVisible()
+  })
 })
