@@ -100,6 +100,7 @@ const DEFAULT_NUM_VARIANTS = 5
 // tan(30°) ≈ 0.577, the fallback half-FOV tangent used when the camera tangent is invalid.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
+const MAX_RENDERER_PIXEL_RATIO = 2
 
 function residueKey(chain: string, residueNum: number) {
   return `${chain || '_'}:${residueNum}`
@@ -929,8 +930,7 @@ export default function ProteinViewer3D({
     const tangent = Math.tan(fov / 2)
     const safeTangent =
       Number.isFinite(tangent) && tangent > MIN_CAMERA_TANGENT ? tangent : DEFAULT_CAMERA_TAN_HALF_FOV
-    if (!(safeTangent > 0)) return
-    const distance = (maxDim / 2) / safeTangent
+    const distance = (maxDim / 2) / Math.max(safeTangent, MIN_CAMERA_TANGENT)
 
     camera.position.set(center.x + distance * 0.35, center.y + distance * 0.25, center.z + distance * 1.35)
     camera.near = Math.max(0.1, distance / 100)
@@ -1150,7 +1150,7 @@ export default function ProteinViewer3D({
       cameraRef.current = camera
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_RENDERER_PIXEL_RATIO))
        renderer.setSize(width, height)
        renderer.outputColorSpace = THREE.SRGBColorSpace
        container.appendChild(renderer.domElement)

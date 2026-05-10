@@ -369,6 +369,7 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-analysis-ribbon')).toBeInViewport()
     await expect(page.getByTestId('viewer-analysis-positions-input')).toHaveValue('9,10')
     await page.getByTestId('viewer-analysis-positions-input').fill('9,10,28')
+    await expect(page.getByTestId('viewer-analysis-positions-input')).toHaveValue('9,10,28')
     await page.getByTestId('viewer-analysis-num-variants').fill('3')
     await page.getByTestId('viewer-analysis-details').click()
     await expect(page.getByTestId('viewer-workflow-summary')).toBeInViewport()
