@@ -683,6 +683,14 @@ export default function ProteinViewer3D({
     }
   }, [selectedResidueDetails])
 
+  const primarySelectionIndex = useMemo(() => {
+    if (!selectionSummary) return -1
+    return selectedResidueDetails.findIndex(
+      (item) =>
+        item.chain === selectionSummary.primary.chain && item.residueNum === selectionSummary.primary.residueNum
+    )
+  }, [selectedResidueDetails, selectionSummary])
+
   const selectionAnalytics = useMemo(() => {
     if (selectedResidueDetails.length === 0) return null
 
@@ -909,6 +917,29 @@ export default function ProteinViewer3D({
     const text = selectionAnalytics.labels.join(', ')
     const copied = await copyTextToClipboard(text)
     setAnalysisMessage(copied ? `Copied selected residues ${text}.` : `Selected residues ready to copy: ${text}.`)
+  }
+
+  const focusSelectionFromSpotlight = (selection: ResidueSelection) => {
+    setSelectedResidues((prev) => {
+      const match = prev.find(
+        (item) => item.chain === selection.chain && item.residueNum === selection.residueNum
+      )
+      if (!match) return prev
+      return [...prev.filter((item) => !(item.chain === match.chain && item.residueNum === match.residueNum)), match]
+    })
+    focusSelectionEntry(selection)
+  }
+
+  const cycleSpotlightSelection = (offset: number) => {
+    if (selectedResidueDetails.length === 0) {
+      setAnalysisMessage('Select residues before cycling through the spotlight.')
+      return
+    }
+
+    const baseIndex = primarySelectionIndex >= 0 ? primarySelectionIndex : selectedResidueDetails.length - 1
+    const nextIndex = (baseIndex + offset + selectedResidueDetails.length) % selectedResidueDetails.length
+    const target = selectedResidueDetails[nextIndex]
+    focusSelectionFromSpotlight(target)
   }
 
   const scrollToVariantProposal = () => {
@@ -1490,6 +1521,72 @@ export default function ProteinViewer3D({
                       testId="viewer-selection-spotlight-range"
                     />
                   </div>
+                  {selectedResidueDetails.length > 1 && (
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-100">
+                            Selection navigator
+                          </div>
+                          <div className="mt-1 text-xs text-emerald-100/75">
+                            Cycle or jump between selected residues without leaving the viewer.
+                          </div>
+                        </div>
+                        <span
+                          data-testid="viewer-selection-spotlight-index"
+                          className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-emerald-50"
+                        >
+                          {primarySelectionIndex + 1} / {selectedResidueDetails.length}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          data-testid="viewer-selection-spotlight-prev"
+                          onClick={() => cycleSpotlightSelection(-1)}
+                          className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-50 transition hover:bg-white/15"
+                        >
+                          Previous
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="viewer-selection-spotlight-next"
+                          onClick={() => cycleSpotlightSelection(1)}
+                          className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-50 transition hover:bg-white/15"
+                        >
+                          Next
+                        </button>
+                      </div>
+                      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                        {selectedResidueDetails.map((detail) => {
+                          const active =
+                            detail.chain === selectionSummary.primary.chain &&
+                            detail.residueNum === selectionSummary.primary.residueNum
+                          return (
+                            <button
+                              key={`spotlight-${detail.chain}-${detail.residueNum}`}
+                              type="button"
+                              data-testid={`viewer-selection-spotlight-chip-${detail.chain}-${detail.residueNum}`}
+                              onClick={() =>
+                                focusSelectionFromSpotlight({
+                                  chain: detail.chain,
+                                  residueNum: detail.residueNum,
+                                  residue: detail.residue,
+                                })
+                              }
+                              className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                active
+                                  ? 'border-emerald-300/40 bg-emerald-400/20 text-emerald-50'
+                                  : 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
+                              }`}
+                            >
+                              {formatResidueSelection(detail)}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap">
                     <button
                       type="button"
