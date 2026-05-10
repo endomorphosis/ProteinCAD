@@ -1,4 +1,4 @@
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import type { Client } from '@modelcontextprotocol/sdk/dist/client/index.js'
 
 export declare class HttpJsonRpcTransport {
   onclose?: () => void

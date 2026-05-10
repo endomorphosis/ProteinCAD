@@ -1,4 +1,4 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { Client } from '@modelcontextprotocol/sdk/dist/client/index.js'
 
 function defaultBaseUrl() {
   const base =
@@ -119,7 +119,7 @@ export function tryParseJson(text) {
 /**
  * @template T
  * @param {{ baseUrl?: string, clientName?: string, clientVersion?: string }} [options]
- * @param {(client: import('@modelcontextprotocol/sdk/client/index.js').Client) => Promise<T>} fn
+ * @param {(client: import('@modelcontextprotocol/sdk/dist/client/index.js').Client) => Promise<T>} fn
  * @returns {Promise<T>}
  */
 export async function withMcpClient(options, fn) {

@@ -1,9 +1,57 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { addToDesignLibrary } from '@/lib/design-library'
+
+type RenderMode = 'ribbon' | 'cartoon' | 'sphere' | 'stick'
+type SecondaryType = 'helix' | 'sheet' | 'turn' | 'coil'
+
+type Atom = {
+  key: string
+  element: string
+  x: number
+  y: number
+  z: number
+  residue: string
+  residueNum: number
+  chain: string
+  atomName: string
+  bFactor: number
+}
+
+type ResidueSummary = {
+  key: string
+  chain: string
+  residueNum: number
+  residue: string
+  atoms: Atom[]
+  center: THREE.Vector3
+  caAtom?: Atom
+  avgBFactor: number
+}
+
+type ParseResult = {
+  atoms: Atom[]
+  residues: ResidueSummary[]
+  chains: string[]
+  warnings: string[]
+  bFactorRange: { min: number; max: number; average: number }
+}
+
+type Segment = {
+  start: number
+  end: number
+  type: SecondaryType
+}
+
+type ResidueSelection = { chain: string; residueNum: number; residue: string }
+
+type BuildResult = {
+  group: THREE.Group
+  residueCenters: Map<string, THREE.Vector3>
+}
 
 interface ProteinViewer3DProps {
   pdbData: string
@@ -13,109 +61,625 @@ interface ProteinViewer3DProps {
   onUseSequence?: (sequence: string) => void
 }
 
-export default function ProteinViewer3D({ pdbData, onClose, title, sequence, onUseSequence }: ProteinViewer3DProps) {
+const ELEMENT_COLORS: Record<string, number> = {
+  C: 0x909090,
+  N: 0x3b82f6,
+  O: 0xef4444,
+  S: 0xfacc15,
+  H: 0xffffff,
+  P: 0xf97316,
+  default: 0xd946ef,
+}
+
+const SECONDARY_COLORS: Record<SecondaryType, number> = {
+  helix: 0xfb7185,
+  sheet: 0xfacc15,
+  turn: 0x22d3ee,
+  coil: 0x94a3b8,
+}
+
+function residueKey(chain: string, residueNum: number) {
+  return `${chain || '_'}:${residueNum}`
+}
+
+function distance(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
+}
+
+function getAtomPosition(atom: Atom) {
+  return new THREE.Vector3(atom.x, atom.y, atom.z)
+}
+
+function parsePDB(pdb: string): ParseResult {
+  const atoms: Atom[] = []
+  const warnings: string[] = []
+  const residueMap = new Map<string, { chain: string; residueNum: number; residue: string; atoms: Atom[] }>()
+  let malformedCount = 0
+
+  for (const line of pdb.split('\n')) {
+    if (!line.startsWith('ATOM') && !line.startsWith('HETATM')) continue
+
+    try {
+      const atomName = line.substring(12, 16).trim()
+      const element = line.substring(76, 78).trim() || atomName.charAt(0) || 'C'
+      const x = Number.parseFloat(line.substring(30, 38))
+      const y = Number.parseFloat(line.substring(38, 46))
+      const z = Number.parseFloat(line.substring(46, 54))
+      const residue = line.substring(17, 20).trim() || 'UNK'
+      const residueNum = Number.parseInt(line.substring(22, 26).trim(), 10)
+      const chain = line.substring(21, 22).trim() || 'A'
+      const bFactor = Number.parseFloat(line.substring(60, 66).trim()) || 0
+
+      if (![x, y, z, residueNum].every(Number.isFinite)) {
+        malformedCount += 1
+        continue
+      }
+
+      const key = `${atoms.length}:${chain}:${residueNum}:${atomName}`
+      const atom: Atom = { key, element, x, y, z, residue, residueNum, chain, atomName, bFactor }
+      atoms.push(atom)
+
+      const resKey = residueKey(chain, residueNum)
+      const bucket = residueMap.get(resKey) || { chain, residueNum, residue, atoms: [] }
+      bucket.atoms.push(atom)
+      residueMap.set(resKey, bucket)
+    } catch {
+      malformedCount += 1
+    }
+  }
+
+  if (malformedCount > 0) {
+    warnings.push(`Skipped ${malformedCount} malformed atom record${malformedCount === 1 ? '' : 's'}.`)
+  }
+
+  const residues = Array.from(residueMap.values())
+    .map((item) => {
+      const center = item.atoms.reduce(
+        (acc, atom) => acc.add(getAtomPosition(atom)),
+        new THREE.Vector3(0, 0, 0)
+      )
+      center.divideScalar(Math.max(item.atoms.length, 1))
+      const caAtom = item.atoms.find((atom) => atom.atomName === 'CA')
+      const avgBFactor =
+        item.atoms.reduce((sum, atom) => sum + atom.bFactor, 0) / Math.max(item.atoms.length, 1)
+      return {
+        key: residueKey(item.chain, item.residueNum),
+        chain: item.chain,
+        residueNum: item.residueNum,
+        residue: item.residue,
+        atoms: item.atoms,
+        center,
+        caAtom,
+        avgBFactor,
+      }
+    })
+    .sort((a, b) => (a.chain === b.chain ? a.residueNum - b.residueNum : a.chain.localeCompare(b.chain)))
+
+  const chains = Array.from(new Set(residues.map((residue) => residue.chain)))
+  const bFactors = atoms.map((atom) => atom.bFactor)
+  const min = bFactors.length ? Math.min(...bFactors) : 0
+  const max = bFactors.length ? Math.max(...bFactors) : 0
+  const average =
+    bFactors.length > 0 ? bFactors.reduce((sum, value) => sum + value, 0) / bFactors.length : 0
+
+  return {
+    atoms,
+    residues,
+    chains,
+    warnings,
+    bFactorRange: { min, max, average },
+  }
+}
+
+function detectSecondaryStructure(residues: ResidueSummary[]): Segment[] {
+  const caResidues = residues.filter((residue) => residue.caAtom)
+  if (caResidues.length < 4) {
+    return [{ start: 0, end: Math.max(caResidues.length - 1, 0), type: 'coil' }]
+  }
+
+  const labels = new Array<SecondaryType>(caResidues.length).fill('coil')
+
+  for (let index = 1; index < caResidues.length - 2; index += 1) {
+    const prev = caResidues[index - 1].caAtom!
+    const current = caResidues[index].caAtom!
+    const next = caResidues[index + 1].caAtom!
+    const lookahead = caResidues[index + 2].caAtom!
+
+    const v1 = new THREE.Vector3(current.x - prev.x, current.y - prev.y, current.z - prev.z).normalize()
+    const v2 = new THREE.Vector3(next.x - current.x, next.y - current.y, next.z - current.z).normalize()
+    const angle = THREE.MathUtils.radToDeg(v1.angleTo(v2))
+    const helixDistance = distance(current, lookahead)
+    const strandDistance = distance(prev, next)
+
+    if (helixDistance >= 4.8 && helixDistance <= 6.4 && angle >= 65 && angle <= 130) {
+      labels[index] = 'helix'
+      labels[index + 1] = 'helix'
+      continue
+    }
+
+    if (strandDistance >= 6.1 && strandDistance <= 7.5 && angle >= 135) {
+      labels[index] = 'sheet'
+      continue
+    }
+
+    if (angle >= 110 && angle < 135) {
+      labels[index] = 'turn'
+    }
+  }
+
+  const segments: Segment[] = []
+  let start = 0
+  let current = labels[0]
+
+  for (let index = 1; index < labels.length; index += 1) {
+    if (labels[index] === current) continue
+    segments.push({ start, end: index - 1, type: current })
+    start = index
+    current = labels[index]
+  }
+  segments.push({ start, end: labels.length - 1, type: current })
+
+  return segments
+}
+
+function getBFactorColor(value: number, range: ParseResult['bFactorRange']) {
+  const spread = Math.max(range.max - range.min, 1)
+  const normalized = THREE.MathUtils.clamp((value - range.min) / spread, 0, 1)
+  return new THREE.Color().setHSL((1 - normalized) * 0.7, 0.95, 0.55)
+}
+
+function getStructureColor(type: SecondaryType, heatmap: boolean, value: number, model: ParseResult) {
+  return heatmap ? getBFactorColor(value, model.bFactorRange) : new THREE.Color(SECONDARY_COLORS[type])
+}
+
+function addHotspot(
+  group: THREE.Group,
+  residue: ResidueSummary,
+  center: THREE.Vector3,
+  selectedKeys: Set<string>
+) {
+  const geometry = new THREE.SphereGeometry(selectedKeys.has(residue.key) ? 0.6 : 0.45, 12, 12)
+  const material = new THREE.MeshBasicMaterial({
+    color: selectedKeys.has(residue.key) ? 0xf8fafc : 0x60a5fa,
+    transparent: true,
+    opacity: selectedKeys.has(residue.key) ? 0.8 : 0.12,
+    depthWrite: false,
+  })
+  const hotspot = new THREE.Mesh(geometry, material)
+  hotspot.position.copy(center)
+  hotspot.userData = {
+    kind: 'residue',
+    chain: residue.chain,
+    residueNum: residue.residueNum,
+    residue: residue.residue,
+  }
+  group.add(hotspot)
+}
+
+function createRibbonRepresentation(
+  group: THREE.Group,
+  residues: ResidueSummary[],
+  model: ParseResult,
+  heatmap: boolean,
+  selectedKeys: Set<string>
+) {
+  const caResidues = residues.filter((residue) => residue.caAtom)
+  if (caResidues.length < 2) return
+
+  const points = caResidues.map((residue) => getAtomPosition(residue.caAtom!))
+  const curve = new THREE.CatmullRomCurve3(points)
+  const color = heatmap
+    ? getBFactorColor(model.bFactorRange.average, model.bFactorRange)
+    : new THREE.Color(0x93c5fd)
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, Math.max(points.length * 8, 32), 0.4, 14, false),
+    new THREE.MeshPhongMaterial({ color, shininess: 45, transparent: true, opacity: 0.94 })
+  )
+  group.add(tube)
+
+  for (const residue of caResidues) {
+    const center = getAtomPosition(residue.caAtom!)
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(selectedKeys.has(residue.key) ? 0.42 : 0.24, 12, 12),
+      new THREE.MeshPhongMaterial({
+        color: selectedKeys.has(residue.key)
+          ? 0xf8fafc
+          : getStructureColor('coil', heatmap, residue.avgBFactor, model),
+        emissive: selectedKeys.has(residue.key) ? new THREE.Color(0x2563eb) : new THREE.Color(0x000000),
+        emissiveIntensity: selectedKeys.has(residue.key) ? 0.45 : 0,
+      })
+    )
+    marker.position.copy(center)
+    marker.userData = {
+      kind: 'residue',
+      chain: residue.chain,
+      residueNum: residue.residueNum,
+      residue: residue.residue,
+    }
+    group.add(marker)
+  }
+}
+
+function createArrowSegment(start: THREE.Vector3, end: THREE.Vector3, color: THREE.Color) {
+  const direction = new THREE.Vector3().subVectors(end, start)
+  const length = direction.length()
+  const normalized = direction.clone().normalize()
+  const arrow = new THREE.ArrowHelper(normalized, start, length, color.getHex(), Math.min(length * 0.3, 2.4), 0.8)
+  return arrow
+}
+
+function createCartoonRepresentation(
+  group: THREE.Group,
+  residues: ResidueSummary[],
+  model: ParseResult,
+  heatmap: boolean,
+  selectedKeys: Set<string>
+) {
+  const caResidues = residues.filter((residue) => residue.caAtom)
+  if (caResidues.length < 2) return
+
+  const segments = detectSecondaryStructure(caResidues)
+  for (const segment of segments) {
+    const segmentResidues = caResidues.slice(segment.start, segment.end + 1)
+    if (segmentResidues.length < 2) continue
+
+    const points = segmentResidues.map((residue) => getAtomPosition(residue.caAtom!))
+    const averageB =
+      segmentResidues.reduce((sum, residue) => sum + residue.avgBFactor, 0) / segmentResidues.length
+    const color = getStructureColor(segment.type, heatmap, averageB, model)
+
+    if (segment.type === 'sheet') {
+      const start = points[0]
+      const end = points[points.length - 1]
+      const arrow = createArrowSegment(start, end, color)
+      group.add(arrow)
+
+      const ribbon = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.32, 0.32, start.distanceTo(end), 12, 1, false),
+        new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.85 })
+      )
+      ribbon.position.copy(start.clone().add(end).multiplyScalar(0.5))
+      ribbon.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3().subVectors(end, start).normalize()
+      )
+      group.add(ribbon)
+    } else {
+      const radius = segment.type === 'helix' ? 0.55 : segment.type === 'turn' ? 0.28 : 0.22
+      const tubularSegments = Math.max(points.length * 10, 24)
+      const mesh = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), tubularSegments, radius, 16, false),
+        new THREE.MeshPhongMaterial({ color, shininess: 65, transparent: true, opacity: 0.96 })
+      )
+      group.add(mesh)
+    }
+  }
+
+  for (const residue of caResidues) {
+    addHotspot(group, residue, getAtomPosition(residue.caAtom!), selectedKeys)
+  }
+}
+
+function buildBonds(atoms: Atom[]) {
+  const cellSize = 2.1
+  const grid = new Map<string, number[]>()
+  const bonds: Array<[Atom, Atom]> = []
+
+  const keyFor = (x: number, y: number, z: number) =>
+    `${Math.floor(x / cellSize)}:${Math.floor(y / cellSize)}:${Math.floor(z / cellSize)}`
+
+  atoms.forEach((atom, index) => {
+    const cx = Math.floor(atom.x / cellSize)
+    const cy = Math.floor(atom.y / cellSize)
+    const cz = Math.floor(atom.z / cellSize)
+
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dz = -1; dz <= 1; dz += 1) {
+          const bucket = grid.get(`${cx + dx}:${cy + dy}:${cz + dz}`)
+          if (!bucket) continue
+          for (const otherIndex of bucket) {
+            const other = atoms[otherIndex]
+            const bondDistance = distance(atom, other)
+            if (bondDistance > 0.4 && bondDistance < 1.85) {
+              bonds.push([other, atom])
+            }
+          }
+        }
+      }
+    }
+
+    const key = keyFor(atom.x, atom.y, atom.z)
+    const bucket = grid.get(key) || []
+    bucket.push(index)
+    grid.set(key, bucket)
+  })
+
+  return bonds
+}
+
+function createAtomicRepresentation(
+  group: THREE.Group,
+  atoms: Atom[],
+  residues: ResidueSummary[],
+  selectedKeys: Set<string>,
+  stickOnly: boolean
+) {
+  if (!stickOnly) {
+    for (const atom of atoms) {
+      const isSelected = selectedKeys.has(residueKey(atom.chain, atom.residueNum))
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(isSelected ? 0.38 : 0.28, 16, 16),
+        new THREE.MeshPhongMaterial({
+          color: ELEMENT_COLORS[atom.element] || ELEMENT_COLORS.default,
+          transparent: selectedKeys.size > 0 && !isSelected,
+          opacity: selectedKeys.size > 0 && !isSelected ? 0.18 : 1,
+        })
+      )
+      sphere.position.set(atom.x, atom.y, atom.z)
+      sphere.userData = {
+        kind: 'atom',
+        chain: atom.chain,
+        residueNum: atom.residueNum,
+        residue: atom.residue,
+        atomName: atom.atomName,
+      }
+      group.add(sphere)
+    }
+  }
+
+  for (const [left, right] of buildBonds(atoms)) {
+    const bondSelected =
+      selectedKeys.size === 0 ||
+      selectedKeys.has(residueKey(left.chain, left.residueNum)) ||
+      selectedKeys.has(residueKey(right.chain, right.residueNum))
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(left.x, left.y, left.z),
+      new THREE.Vector3(right.x, right.y, right.z),
+    ])
+    const material = new THREE.LineBasicMaterial({
+      color: 0xcbd5e1,
+      transparent: selectedKeys.size > 0 && !bondSelected,
+      opacity: selectedKeys.size > 0 && !bondSelected ? 0.18 : 0.9,
+    })
+    group.add(new THREE.Line(geometry, material))
+  }
+
+  for (const residue of residues) {
+    addHotspot(group, residue, residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center, selectedKeys)
+  }
+}
+
+function buildMolecule(
+  model: ParseResult,
+  mode: RenderMode,
+  heatmap: boolean,
+  selectedChain: string,
+  selectedResidues: ResidueSelection[]
+): BuildResult {
+  const group = new THREE.Group()
+  const selectedKeys = new Set(selectedResidues.map((residue) => residueKey(residue.chain, residue.residueNum)))
+  const residueCenters = new Map<string, THREE.Vector3>()
+
+  const visibleResidues = model.residues.filter(
+    (residue) => selectedChain === 'all' || residue.chain === selectedChain
+  )
+  const visibleAtoms = model.atoms.filter(
+    (atom) => selectedChain === 'all' || atom.chain === selectedChain
+  )
+
+  visibleResidues.forEach((residue) => {
+    residueCenters.set(residue.key, (residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center).clone())
+  })
+
+  const chainGroups = new Map<string, ResidueSummary[]>()
+  for (const residue of visibleResidues) {
+    const bucket = chainGroups.get(residue.chain) || []
+    bucket.push(residue)
+    chainGroups.set(residue.chain, bucket)
+  }
+
+  if (mode === 'ribbon') {
+    chainGroups.forEach((residues) => createRibbonRepresentation(group, residues, model, heatmap, selectedKeys))
+  } else if (mode === 'cartoon') {
+    chainGroups.forEach((residues) => createCartoonRepresentation(group, residues, model, heatmap, selectedKeys))
+  } else if (mode === 'sphere') {
+    createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, false)
+  } else {
+    createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, true)
+  }
+
+  for (const residue of visibleResidues) {
+    if (!selectedKeys.has(residue.key)) continue
+    const center = residueCenters.get(residue.key) || residue.center
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.08, 10, 24),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.92 })
+    )
+    ring.position.copy(center)
+    ring.rotation.x = Math.PI / 2
+    group.add(ring)
+  }
+
+  return { group, residueCenters }
+}
+
+function formatResidueSelection(selection: ResidueSelection) {
+  return `${selection.chain}:${selection.residueNum} ${selection.residue}`
+}
+
+export default function ProteinViewer3D({
+  pdbData,
+  onClose,
+  title,
+  sequence,
+  onUseSequence,
+}: ProteinViewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [renderMode, setRenderMode] = useState<'ribbon' | 'cartoon' | 'sphere' | 'stick'>('ribbon')
-  const [showHeatmap, setShowHeatmap] = useState(false)
-  const [selectedResidues, setSelectedResidues] = useState<Array<{ chain: string; residueNum: number; residue: string }>>([])
-  const [positionsText, setPositionsText] = useState<string>('')
-  const [numVariants, setNumVariants] = useState<number>(5)
-  const [variantsResult, setVariantsResult] = useState<any>(null)
-  const [variantsError, setVariantsError] = useState<string | null>(null)
-  const [variantsRunning, setVariantsRunning] = useState(false)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const moleculeRef = useRef<THREE.Group | null>(null)
+  const residueCentersRef = useRef<Map<string, THREE.Vector3>>(new Map())
 
-  const setObjectMaterialOpacity = (obj: THREE.Object3D, opacity: number, transparent: boolean) => {
-    const mesh = obj as THREE.Mesh
-    const mat = (mesh as any).material as THREE.Material | THREE.Material[] | undefined
-    const applyTo = (m: THREE.Material) => {
-      const anyMat = m as any
-      if (typeof anyMat.opacity === 'number' && typeof anyMat.transparent === 'boolean') {
-        anyMat.opacity = opacity
-        anyMat.transparent = transparent
-        anyMat.needsUpdate = true
-      }
-    }
+  const [error, setError] = useState<string | null>(null)
+  const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
+  const [showHeatmap, setShowHeatmap] = useState(false)
+  const [selectedResidues, setSelectedResidues] = useState<ResidueSelection[]>([])
+  const [positionsText, setPositionsText] = useState('')
+  const [numVariants, setNumVariants] = useState(5)
+  const [variantsResult, setVariantsResult] = useState<any>(null)
+  const [variantsError, setVariantsError] = useState<string | null>(null)
+  const [variantsRunning, setVariantsRunning] = useState(false)
+  const [selectedChain, setSelectedChain] = useState('all')
+  const [focusResidue, setFocusResidue] = useState('')
+  const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
 
-    if (!mat) return
-    if (Array.isArray(mat)) {
-      mat.forEach(applyTo)
-    } else {
-      applyTo(mat)
-    }
-  }
+  const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
+
+  const visibleResidues = useMemo(
+    () =>
+      parsed.residues.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain),
+    [parsed.residues, selectedChain]
+  )
 
   useEffect(() => {
-    const scene = sceneRef.current
-    if (!scene) return
+    setSelectedResidues((prev) =>
+      prev.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain)
+    )
+  }, [selectedChain])
 
-    // Only atoms exist as meshes in Ball & Stick mode; keep other modes untouched.
-    if (renderMode !== 'sphere') {
-      scene.traverse((obj) => {
-        const ud = (obj as any)?.userData
-        if (ud?.kind !== 'atom') return
-        setObjectMaterialOpacity(obj, 1, false)
-      })
-      return
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
     }
-
-    const selectedKeys = new Set(selectedResidues.map((r) => `${r.chain}:${r.residueNum}`))
-    const hasSelection = selectedKeys.size > 0
-
-    scene.traverse((obj) => {
-      const ud = (obj as any)?.userData
-      if (ud?.kind !== 'atom') return
-
-      if (!hasSelection) {
-        setObjectMaterialOpacity(obj, 1, false)
-        return
-      }
-
-      const key = `${String(ud.chain || '')}:${Number(ud.residueNum)}`
-      const isSelected = selectedKeys.has(key)
-
-      // Visual emphasis without introducing new colors: selected atoms stay opaque;
-      // non-selected atoms become translucent.
-      setObjectMaterialOpacity(obj, isSelected ? 1 : 0.25, true)
-    })
-  }, [renderMode, selectedResidues])
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [onClose])
 
   const parsePositions = (text: string) => {
     const nums = text
       .split(/[^0-9]+/g)
-      .map((t) => t.trim())
+      .map((token) => token.trim())
       .filter(Boolean)
-      .map((t) => Number(t))
-      .filter((n) => Number.isFinite(n) && n > 0)
-    const uniq = Array.from(new Set(nums))
-    uniq.sort((a, b) => a - b)
-    return uniq
+      .map((token) => Number(token))
+      .filter((value) => Number.isFinite(value) && value > 0)
+    return Array.from(new Set(nums)).sort((a, b) => a - b)
+  }
+
+  const syncPositionsFromSelection = (selection: ResidueSelection[]) => {
+    const positions = Array.from(new Set(selection.map((residue) => residue.residueNum))).sort((a, b) => a - b)
+    setPositionsText(positions.join(','))
+  }
+
+  const frameCurrentMolecule = (box: THREE.Box3) => {
+    const camera = cameraRef.current
+    const controls = controlsRef.current
+    if (!camera || !controls || box.isEmpty()) return
+
+    const center = box.getCenter(new THREE.Vector3())
+    const size = box.getSize(new THREE.Vector3())
+    const maxDim = Math.max(size.x, size.y, size.z, 1)
+    const fov = THREE.MathUtils.degToRad(camera.fov)
+    const distance = (maxDim / 2) / Math.tan(fov / 2)
+
+    camera.position.set(center.x + distance * 0.35, center.y + distance * 0.25, center.z + distance * 1.35)
+    camera.near = Math.max(0.1, distance / 100)
+    camera.far = Math.max(1000, distance * 20)
+    camera.updateProjectionMatrix()
+    controls.target.copy(center)
+    controls.update()
+  }
+
+  const resetView = () => {
+    const molecule = moleculeRef.current
+    if (!molecule) return
+    frameCurrentMolecule(new THREE.Box3().setFromObject(molecule))
+    setAnalysisMessage(null)
+  }
+
+  const focusOnResidue = () => {
+    const query = focusResidue.trim()
+    if (!query) {
+      setAnalysisMessage('Enter a residue number or chain:number to focus the camera.')
+      return
+    }
+
+    let chain = selectedChain !== 'all' ? selectedChain : ''
+    let residueNum: number | null = null
+
+    if (query.includes(':')) {
+      const [queryChain, residueToken] = query.split(':')
+      chain = queryChain.trim() || chain
+      residueNum = Number.parseInt(residueToken.trim(), 10)
+    } else {
+      residueNum = Number.parseInt(query, 10)
+    }
+
+    if (!chain && selectedChain === 'all') {
+      const match = visibleResidues.find((residue) => residue.residueNum === residueNum)
+      chain = match?.chain || ''
+    }
+
+    if (!chain || !Number.isFinite(residueNum)) {
+      setAnalysisMessage('Use formats like 42 or A:42.')
+      return
+    }
+
+    const key = residueKey(chain, residueNum!)
+    const center = residueCentersRef.current.get(key)
+    if (!center) {
+      setAnalysisMessage(`Residue ${chain}:${residueNum} is not present in the visible structure.`)
+      return
+    }
+
+    const controls = controlsRef.current
+    const camera = cameraRef.current
+    if (!controls || !camera) return
+
+    const offset = new THREE.Vector3(4, 4, 10)
+    controls.target.copy(center)
+    camera.position.copy(center.clone().add(offset))
+    controls.update()
+
+    setSelectedResidues((prev) => {
+      if (prev.some((residue) => residue.chain === chain && residue.residueNum === residueNum)) {
+        return prev
+      }
+      const residue = visibleResidues.find(
+        (item) => item.chain === chain && item.residueNum === residueNum
+      )
+      const next = [
+        ...prev,
+        { chain, residueNum: residueNum!, residue: residue?.residue || 'UNK' },
+      ]
+      syncPositionsFromSelection(next)
+      return next
+    })
+
+    setAnalysisMessage(`Focused on residue ${chain}:${residueNum}.`)
   }
 
   const callProposeVariants = async () => {
     setVariantsError(null)
     setVariantsResult(null)
 
-    if (!sequence || typeof sequence !== 'string' || !sequence.trim()) {
+    if (!sequence || !sequence.trim()) {
       setVariantsError('Sequence is not available for this structure')
       return
     }
 
-    const positions = parsePositions(positionsText)
-      .filter((p) => p >= 1 && p <= sequence.length)
-
+    const positions = parsePositions(positionsText).filter((position) => position >= 1 && position <= sequence.length)
     if (positions.length === 0) {
-      setVariantsError('Select residues (Ball & Stick) or enter positions (1-based)')
+      setVariantsError('Select residues in the viewer or enter valid 1-based positions.')
       return
     }
 
     setVariantsRunning(true)
     try {
-      const res = await fetch('/api/mcp/tools/call', {
+      const response = await fetch('/api/mcp/tools/call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -128,705 +692,515 @@ export default function ProteinViewer3D({ pdbData, onClose, title, sequence, onU
         }),
       })
 
-      const payload = await res.json()
-      if (!res.ok) {
-        throw new Error(payload?.error || `HTTP ${res.status}`)
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload?.error || `HTTP ${response.status}`)
       }
 
-      const text = payload?.content?.find((c: any) => c?.type === 'text')?.text
+      const text = payload?.content?.find((item: any) => item?.type === 'text')?.text
       if (typeof text === 'string' && text.trim()) {
         try {
           setVariantsResult(JSON.parse(text))
         } catch {
           setVariantsResult({ variants: [], raw: text })
         }
-      } else {
-        setVariantsResult(null)
       }
-    } catch (e: any) {
-      setVariantsError(e?.message || 'Variant proposal failed')
+    } catch (err: any) {
+      setVariantsError(err?.message || 'Variant proposal failed')
     } finally {
       setVariantsRunning(false)
     }
   }
 
   useEffect(() => {
-    if (!containerRef.current || !pdbData) return
+    const container = containerRef.current
+    if (!container) return
+
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+
+    if (rendererRef.current) {
+      rendererRef.current.dispose()
+      rendererRef.current = null
+    }
+    if (controlsRef.current) {
+      controlsRef.current.dispose()
+      controlsRef.current = null
+    }
+    if (container.firstChild) {
+      container.innerHTML = ''
+    }
+
+    setError(null)
+    setAnalysisMessage(null)
+
+    if (parsed.atoms.length === 0) {
+      setError('No valid atoms found in the provided PDB data.')
+      return
+    }
 
     try {
-      // Parse PDB data
-      const atoms = parsePDB(pdbData)
-      
-      if (atoms.length === 0) {
-        setError('No valid atoms found in PDB data')
-        return
-      }
-
-      // Setup scene
       const scene = new THREE.Scene()
-      scene.background = new THREE.Color(0x1a202c)
+      scene.background = new THREE.Color(0x020617)
+      scene.fog = new THREE.Fog(0x020617, 85, 220)
       sceneRef.current = scene
 
-      // Setup camera
-      const camera = new THREE.PerspectiveCamera(
-        75,
-        containerRef.current.clientWidth / containerRef.current.clientHeight,
-        0.1,
-        1000
-      )
-      camera.position.z = 50
+      const width = container.clientWidth || 800
+      const height = container.clientHeight || 600
+      const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 2000)
       cameraRef.current = camera
 
-      // Setup renderer
-      const renderer = new THREE.WebGLRenderer({ antialias: true })
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
-      containerRef.current.appendChild(renderer.domElement)
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+      renderer.setSize(width, height)
+      renderer.outputColorSpace = THREE.SRGBColorSpace
+      container.appendChild(renderer.domElement)
       rendererRef.current = renderer
 
-      // Setup controls
       const controls = new OrbitControls(camera, renderer.domElement)
       controls.enableDamping = true
-      controls.dampingFactor = 0.05
-      controls.minDistance = 10
-      controls.maxDistance = 200
+      controls.dampingFactor = 0.06
+      controls.minDistance = 6
+      controls.maxDistance = 240
       controlsRef.current = controls
 
-      // Add lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
-      scene.add(ambientLight)
+      scene.add(new THREE.AmbientLight(0xffffff, 1.1))
 
-      const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8)
-      directionalLight1.position.set(1, 1, 1)
-      scene.add(directionalLight1)
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.2)
+      keyLight.position.set(18, 24, 30)
+      scene.add(keyLight)
 
-      const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4)
-      directionalLight2.position.set(-1, -1, -1)
-      scene.add(directionalLight2)
+      const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.6)
+      rimLight.position.set(-20, -12, -18)
+      scene.add(rimLight)
 
-      // Create molecule
-      createMolecule(scene, atoms, renderMode, showHeatmap)
+      const grid = new THREE.GridHelper(160, 24, 0x1e293b, 0x0f172a)
+      grid.position.y = -25
+      scene.add(grid)
 
-      // Center camera on molecule
-      const box = new THREE.Box3().setFromObject(scene)
-      const center = box.getCenter(new THREE.Vector3())
-      const size = box.getSize(new THREE.Vector3())
-      const maxDim = Math.max(size.x, size.y, size.z)
-      const fov = camera.fov * (Math.PI / 180)
-      let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
-      cameraZ *= 1.5
-      camera.position.set(center.x, center.y, center.z + cameraZ)
-      camera.lookAt(center)
-      controls.target.copy(center)
-
-      // Animation loop
-      const animate = () => {
-        requestAnimationFrame(animate)
-        controls.update()
-        renderer.render(scene, camera)
-      }
-      animate()
+      const { group, residueCenters } = buildMolecule(
+        parsed,
+        renderMode,
+        showHeatmap,
+        selectedChain,
+        selectedResidues
+      )
+      residueCentersRef.current = residueCenters
+      moleculeRef.current = group
+      scene.add(group)
+      frameCurrentMolecule(new THREE.Box3().setFromObject(group))
 
       const raycaster = new THREE.Raycaster()
-      const mouse = new THREE.Vector2()
-      const handleClick = (evt: MouseEvent) => {
-        if (renderMode !== 'sphere') return
-        if (!rendererRef.current || !cameraRef.current || !sceneRef.current) return
-
+      const pointer = new THREE.Vector2()
+      const handleClick = (event: MouseEvent) => {
+        if (!cameraRef.current || !sceneRef.current || !rendererRef.current) return
         const rect = renderer.domElement.getBoundingClientRect()
-        mouse.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1
-        mouse.y = -(((evt.clientY - rect.top) / rect.height) * 2 - 1)
-        raycaster.setFromCamera(mouse, cameraRef.current)
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+        pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+        raycaster.setFromCamera(pointer, cameraRef.current)
 
-        const intersects = raycaster.intersectObjects(sceneRef.current.children, true)
-        const hit = intersects.find((i) => (i.object as any)?.userData?.kind === 'atom')
-        const ud = (hit?.object as any)?.userData
-        if (!ud) return
+        const hit = raycaster
+          .intersectObjects(group.children, true)
+          .find((intersection) => ['residue', 'atom'].includes(String(intersection.object.userData?.kind)))
+        const data = hit?.object.userData
+        if (!data?.residueNum) return
 
-        const chain = String(ud.chain || '')
-        const residueNum = Number(ud.residueNum)
-        const residue = String(ud.residue || '')
-        if (!Number.isFinite(residueNum)) return
+        const selection = {
+          chain: String(data.chain || 'A'),
+          residueNum: Number(data.residueNum),
+          residue: String(data.residue || 'UNK'),
+        }
 
         setSelectedResidues((prev) => {
-          const exists = prev.some((r) => r.chain === chain && r.residueNum === residueNum)
+          const exists = prev.some(
+            (item) => item.chain === selection.chain && item.residueNum === selection.residueNum
+          )
           const next = exists
-            ? prev.filter((r) => !(r.chain === chain && r.residueNum === residueNum))
-            : [...prev, { chain, residueNum, residue }]
-
-          const pos = Array.from(new Set(next.map((r) => r.residueNum))).sort((a, b) => a - b)
-          setPositionsText(pos.join(','))
+            ? prev.filter(
+                (item) => !(item.chain === selection.chain && item.residueNum === selection.residueNum)
+              )
+            : [...prev, selection]
+          syncPositionsFromSelection(next)
           return next
         })
       }
       renderer.domElement.addEventListener('click', handleClick)
 
-      // Handle resize
       const handleResize = () => {
-        if (!containerRef.current || !camera || !renderer) return
-        camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight
-        camera.updateProjectionMatrix()
-        renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
+        const currentContainer = containerRef.current
+        if (!currentContainer || !cameraRef.current || !rendererRef.current) return
+        cameraRef.current.aspect = currentContainer.clientWidth / currentContainer.clientHeight
+        cameraRef.current.updateProjectionMatrix()
+        rendererRef.current.setSize(currentContainer.clientWidth, currentContainer.clientHeight)
       }
       window.addEventListener('resize', handleResize)
+
+      const animate = () => {
+        frameRef.current = requestAnimationFrame(animate)
+        controls.update()
+        renderer.render(scene, camera)
+      }
+      animate()
 
       return () => {
         window.removeEventListener('resize', handleResize)
         renderer.domElement.removeEventListener('click', handleClick)
-        if (containerRef.current && renderer.domElement) {
-          containerRef.current.removeChild(renderer.domElement)
+        if (frameRef.current) {
+          cancelAnimationFrame(frameRef.current)
+          frameRef.current = null
         }
-        renderer.dispose()
         controls.dispose()
+        renderer.dispose()
+        if (container.contains(renderer.domElement)) {
+          container.removeChild(renderer.domElement)
+        }
       }
     } catch (err) {
-      setError(`Failed to render 3D structure: ${err}`)
+      setError(`Failed to render 3D structure: ${String(err)}`)
     }
-  }, [pdbData, renderMode, showHeatmap])
+  }, [onClose, parsed, renderMode, selectedChain, selectedResidues, showHeatmap])
 
-  const parsePDB = (pdb: string) => {
-    const atoms: Array<{
-      element: string
-      x: number
-      y: number
-      z: number
-      residue: string
-      residueNum: number
-      chain: string
-      atomName: string
-      bFactor: number
-    }> = []
-
-    const lines = pdb.split('\n')
-    for (const line of lines) {
-      if (line.startsWith('ATOM') || line.startsWith('HETATM')) {
-        try {
-          const atomName = line.substring(12, 16).trim()
-          const element = line.substring(76, 78).trim() || atomName.charAt(0)
-          const x = parseFloat(line.substring(30, 38))
-          const y = parseFloat(line.substring(38, 46))
-          const z = parseFloat(line.substring(46, 54))
-          const residue = line.substring(17, 20).trim()
-          const residueNum = parseInt(line.substring(22, 26).trim())
-          const chain = line.substring(21, 22).trim()
-          const bFactor = parseFloat(line.substring(60, 66).trim()) || 0
-
-          if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
-            atoms.push({ element, x, y, z, residue, residueNum, chain, atomName, bFactor })
-          }
-        } catch (err) {
-          // Skip malformed lines
-        }
-      }
-    }
-
-    return atoms
+  const clearSelection = () => {
+    setSelectedResidues([])
+    setPositionsText('')
   }
 
-  const detectSecondaryStructure = (
-    caAtoms: Array<{ x: number; y: number; z: number; residueNum: number }>
-  ): Array<{ start: number; end: number; type: 'helix' | 'sheet' | 'turn' | 'coil' }> => {
-    const structures: Array<{ start: number; end: number; type: 'helix' | 'sheet' | 'turn' | 'coil' }> = []
-    
-    // Simple heuristic: detect helices and sheets based on C-alpha distances and angles
-    for (let i = 0; i < caAtoms.length - 3; i++) {
-      const dist1 = Math.sqrt(
-        Math.pow(caAtoms[i].x - caAtoms[i + 3].x, 2) +
-        Math.pow(caAtoms[i].y - caAtoms[i + 3].y, 2) +
-        Math.pow(caAtoms[i].z - caAtoms[i + 3].z, 2)
-      )
-      
-      // Helix: i to i+3 distance ~5.4Å
-      if (dist1 >= 4.5 && dist1 <= 6.5) {
-        let helixEnd = i + 3
-        while (helixEnd < caAtoms.length - 1) {
-          const nextDist = Math.sqrt(
-            Math.pow(caAtoms[helixEnd - 3].x - caAtoms[helixEnd].x, 2) +
-            Math.pow(caAtoms[helixEnd - 3].y - caAtoms[helixEnd].y, 2) +
-            Math.pow(caAtoms[helixEnd - 3].z - caAtoms[helixEnd].z, 2)
-          )
-          if (nextDist < 4.5 || nextDist > 6.5) break
-          helixEnd++
-        }
-        if (helixEnd - i >= 4) {
-          structures.push({ start: i, end: helixEnd, type: 'helix' })
-        }
-      }
-    }
-    
-    return structures
-  }
-
-  const createMolecule = (
-    scene: THREE.Scene,
-    atoms: Array<{ element: string; x: number; y: number; z: number; residue: string; residueNum: number; chain: string; atomName: string; bFactor: number }>,
-    mode: 'ribbon' | 'cartoon' | 'sphere' | 'stick',
-    heatmap: boolean
-  ) => {
-    // Clear existing molecule
-    scene.children = scene.children.filter(
-      child => !(child instanceof THREE.Mesh || child instanceof THREE.Line)
-    )
-
-    const colors: Record<string, number> = {
-      C: 0x909090,
-      N: 0x3050f8,
-      O: 0xff0d0d,
-      S: 0xffff30,
-      H: 0xffffff,
-      P: 0xff8000,
-      default: 0xff00ff
-    }
-
-    const secondaryStructureColors = {
-      helix: 0xff4081,    // Pink/magenta for alpha helices
-      sheet: 0xffd600,    // Yellow for beta sheets
-      turn: 0x00bcd4,     // Cyan for turns
-      coil: 0x9e9e9e      // Gray for random coil
-    }
-
-    if (mode === 'ribbon' || mode === 'cartoon') {
-      // Get C-alpha atoms for ribbon/cartoon representation
-      const caAtoms = atoms.filter(a => a.atomName === 'CA')
-      
-      if (caAtoms.length === 0) {
-        // Fallback if no CA atoms found
-        setError('No C-alpha atoms found for ribbon visualization')
-        return
-      }
-
-      // Detect secondary structure
-      const structures = detectSecondaryStructure(caAtoms)
-
-      // Create ribbon with arrows for directionality
-      for (let i = 0; i < caAtoms.length - 1; i++) {
-        const curr = caAtoms[i]
-        const next = caAtoms[i + 1]
-        
-        // Determine secondary structure type for this segment
-        let structureType: 'helix' | 'sheet' | 'turn' | 'coil' = 'coil'
-        for (const struct of structures) {
-          if (i >= struct.start && i < struct.end) {
-            structureType = struct.type
-            break
-          }
-        }
-
-        const color = heatmap 
-          ? new THREE.Color().setHSL((1 - curr.bFactor / 100) * 0.7, 1, 0.5)
-          : new THREE.Color(secondaryStructureColors[structureType])
-
-        // Create ribbon segment
-        const direction = new THREE.Vector3(
-          next.x - curr.x,
-          next.y - curr.y,
-          next.z - curr.z
-        )
-        const length = direction.length()
-        direction.normalize()
-
-        // For helices: use wider ribbon with twist
-        // For sheets: use flat arrow ribbons
-        // For coils: use thin tube
-
-        if (structureType === 'helix' && mode === 'ribbon') {
-          // Helical ribbon - coil shape
-          const curve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(curr.x, curr.y, curr.z),
-            new THREE.Vector3(next.x, next.y, next.z)
-          ])
-          const tubeGeometry = new THREE.TubeGeometry(curve, 8, 0.4, 8, false)
-          const material = new THREE.MeshPhongMaterial({ 
-            color, 
-            side: THREE.DoubleSide,
-            shininess: 30
-          })
-          const tube = new THREE.Mesh(tubeGeometry, material)
-          scene.add(tube)
-        } else if (structureType === 'sheet' && mode === 'ribbon') {
-          // Beta sheet - flat arrow ribbon showing directionality
-          const arrowWidth = 0.8
-          const arrowHeight = 0.1
-          
-          // Create arrow shape pointing in direction of backbone
-          const shape = new THREE.Shape()
-          shape.moveTo(-arrowWidth/2, 0)
-          shape.lineTo(arrowWidth/2, 0)
-          shape.lineTo(arrowWidth/2, length * 0.7)
-          shape.lineTo(arrowWidth * 0.7, length * 0.7)
-          shape.lineTo(0, length)
-          shape.lineTo(-arrowWidth * 0.7, length * 0.7)
-          shape.lineTo(-arrowWidth/2, length * 0.7)
-          shape.lineTo(-arrowWidth/2, 0)
-
-          const extrudeSettings = {
-            steps: 1,
-            depth: arrowHeight,
-            bevelEnabled: false
-          }
-
-          const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings)
-          const material = new THREE.MeshPhongMaterial({ 
-            color,
-            side: THREE.DoubleSide,
-            shininess: 50
-          })
-          const arrow = new THREE.Mesh(geometry, material)
-          
-          // Position and orient the arrow
-          arrow.position.set(curr.x, curr.y, curr.z)
-          arrow.lookAt(next.x, next.y, next.z)
-          arrow.rotateX(Math.PI / 2)
-          
-          scene.add(arrow)
-        } else {
-          // Coil/turn - simple smooth tube
-          const curve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(curr.x, curr.y, curr.z),
-            new THREE.Vector3(next.x, next.y, next.z)
-          ])
-          const tubeGeometry = new THREE.TubeGeometry(curve, 4, 0.2, 6, false)
-          const material = new THREE.MeshPhongMaterial({ color })
-          const tube = new THREE.Mesh(tubeGeometry, material)
-          scene.add(tube)
-        }
-      }
-    } else if (mode === 'sphere') {
-      // Ball-and-stick representation
-      atoms.forEach(atom => {
-        const geometry = new THREE.SphereGeometry(0.3, 16, 16)
-        const color = colors[atom.element] || colors.default
-        const material = new THREE.MeshPhongMaterial({ color })
-        const sphere = new THREE.Mesh(geometry, material)
-        ;(sphere as any).userData = {
-          kind: 'atom',
-          chain: atom.chain,
-          residueNum: atom.residueNum,
-          residue: atom.residue,
-          atomName: atom.atomName,
-        }
-        sphere.position.set(atom.x, atom.y, atom.z)
-        scene.add(sphere)
-      })
-
-      // Add bonds (simple distance-based)
-      for (let i = 0; i < atoms.length; i++) {
-        for (let j = i + 1; j < atoms.length; j++) {
-          const dist = Math.sqrt(
-            Math.pow(atoms[i].x - atoms[j].x, 2) +
-            Math.pow(atoms[i].y - atoms[j].y, 2) +
-            Math.pow(atoms[i].z - atoms[j].z, 2)
-          )
-          if (dist < 1.8) {
-            const points = [
-              new THREE.Vector3(atoms[i].x, atoms[i].y, atoms[i].z),
-              new THREE.Vector3(atoms[j].x, atoms[j].y, atoms[j].z)
-            ]
-            const geometry = new THREE.BufferGeometry().setFromPoints(points)
-            const material = new THREE.LineBasicMaterial({ color: 0x666666 })
-            const line = new THREE.Line(geometry, material)
-            scene.add(line)
-          }
-        }
-      }
-    } else if (mode === 'stick') {
-      // Stick representation
-      for (let i = 0; i < atoms.length; i++) {
-        for (let j = i + 1; j < atoms.length; j++) {
-          const dist = Math.sqrt(
-            Math.pow(atoms[i].x - atoms[j].x, 2) +
-            Math.pow(atoms[i].y - atoms[j].y, 2) +
-            Math.pow(atoms[i].z - atoms[j].z, 2)
-          )
-          if (dist < 1.8) {
-            const points = [
-              new THREE.Vector3(atoms[i].x, atoms[i].y, atoms[i].z),
-              new THREE.Vector3(atoms[j].x, atoms[j].y, atoms[j].z)
-            ]
-            const geometry = new THREE.BufferGeometry().setFromPoints(points)
-            const color = colors[atoms[i].element] || colors.default
-            const material = new THREE.LineBasicMaterial({ color, linewidth: 3 })
-            const line = new THREE.Line(geometry, material)
-            scene.add(line)
-          }
-        }
-      }
-    }
-  }
-
-  const changeRenderMode = (mode: 'ribbon' | 'cartoon' | 'sphere' | 'stick') => {
-    setRenderMode(mode)
+  const residueStats = {
+    atoms: parsed.atoms.length,
+    residues: parsed.residues.length,
+    visibleResidues: visibleResidues.length,
+    chains: parsed.chains.length,
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-6xl h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
+      <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-900 shadow-2xl shadow-slate-950/40">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-              🔬 3D Protein Structure Viewer
-            </h3>
-            {title && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{title}</p>}
+            <div className="flex items-center gap-3">
+              <h3 className="text-2xl font-semibold text-white">3D Protein Structure Viewer</h3>
+              <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                Interactive analysis
+              </span>
+            </div>
+            {title && <p className="mt-1 text-sm text-slate-400">{title}</p>}
+            {parsed.warnings.length > 0 && (
+              <p className="mt-2 text-sm text-amber-300">{parsed.warnings[0]}</p>
+            )}
           </div>
           <button
             onClick={onClose}
             aria-label="Close 3D Viewer"
             data-testid="close-3d-viewer"
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 hover:text-white"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Controls */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex gap-2 items-center flex-wrap">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Render Mode:</span>
-          <button
-            onClick={() => changeRenderMode('ribbon')}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              renderMode === 'ribbon'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-            }`}
-          >
-            🎀 Ribbon (Biochem)
-          </button>
-          <button
-            onClick={() => changeRenderMode('sphere')}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              renderMode === 'sphere'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-            }`}
-          >
-            Ball & Stick
-          </button>
-          <button
-            onClick={() => changeRenderMode('stick')}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              renderMode === 'stick'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-            }`}
-          >
-            Stick
-          </button>
-          <button
-            onClick={() => changeRenderMode('cartoon')}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              renderMode === 'cartoon'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-            }`}
-          >
-            Cartoon
-          </button>
-          
-          <div className="border-l border-gray-300 dark:border-gray-600 h-8 mx-2"></div>
-          
-          <button
-            onClick={() => setShowHeatmap(!showHeatmap)}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              showHeatmap
-                ? 'bg-orange-600 text-white'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
-            }`}
-            title="B-factor heatmap (thermal motion/flexibility)"
-          >
-            🔥 B-Factor Heatmap
-          </button>
-
-          {sequence && (
-            <>
-              <div className="border-l border-gray-300 dark:border-gray-600 h-8 mx-2"></div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Variants:</span>
-                <input
-                  aria-label="Variant positions"
-                  data-testid="variant-positions"
-                  value={positionsText}
-                  onChange={(e) => setPositionsText(e.target.value)}
-                  placeholder="positions (1-based) e.g. 12,15,16"
-                  className="px-3 py-2 rounded text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 w-64"
-                />
-                <input
-                  aria-label="Number of variants"
-                  data-testid="variant-num"
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={numVariants}
-                  onChange={(e) => {
-                    const n = Number(e.target.value)
-                    setNumVariants(Number.isFinite(n) && n >= 1 ? Math.min(20, Math.floor(n)) : 5)
-                  }}
-                  className="px-3 py-2 rounded text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 w-24"
-                />
+        <div className="grid flex-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-h-0 flex-col border-b border-white/10 xl:border-b-0 xl:border-r">
+            <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
+              {([
+                ['ribbon', 'Ribbon'],
+                ['cartoon', 'Cartoon'],
+                ['sphere', 'Ball & Stick'],
+                ['stick', 'Stick'],
+              ] as Array<[RenderMode, string]>).map(([mode, label]) => (
                 <button
-                  onClick={callProposeVariants}
-                  data-testid="propose-variants"
-                  disabled={variantsRunning}
-                  className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                    variantsRunning
-                      ? 'bg-gray-300 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  key={mode}
+                  onClick={() => setRenderMode(mode)}
+                  className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                    renderMode === mode
+                      ? 'bg-cyan-400 text-slate-950'
+                      : 'bg-white/5 text-slate-300 hover:bg-white/10'
                   }`}
-                  title={renderMode === 'sphere' ? 'Click atoms to select residues' : 'Switch to Ball & Stick to select residues'}
                 >
-                  {variantsRunning ? 'Proposing…' : 'Propose Variants'}
+                  {label}
                 </button>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {renderMode === 'sphere'
-                    ? `Selected: ${selectedResidues.length} residue(s). Click atoms to toggle.`
-                    : `Selected: ${selectedResidues.length} residue(s). Use Ball & Stick to click.`}
-                </span>
-              </div>
-            </>
-          )}
-          
-          <div className="ml-auto text-xs text-gray-500 dark:text-gray-400">
-            💡 Use mouse to rotate, scroll to zoom
-          </div>
-        </div>
+              ))}
 
-        {/* 3D Viewer */}
-        <div className="flex-1 relative">
-          {error ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-6xl mb-4">⚠️</div>
-                <p className="text-red-600 dark:text-red-400">{error}</p>
-              </div>
+              <button
+                onClick={() => setShowHeatmap((prev) => !prev)}
+                className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                  showHeatmap
+                    ? 'bg-amber-400 text-slate-950'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title="B-factor heatmap"
+              >
+                B-factor heatmap
+              </button>
+
+              <button
+                onClick={resetView}
+                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Reset view
+              </button>
+
+              <div className="ml-auto text-xs text-slate-400">Rotate: drag · Zoom: scroll · Select: click residues</div>
             </div>
-          ) : (
-            <div ref={containerRef} className="w-full h-full" />
-          )}
-        </div>
 
-        {/* Footer with legend */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          {(variantsError || (variantsResult && variantsResult?.variants?.length)) && (
-            <div className="mb-3">
-              {variantsError && (
-                <div className="text-sm text-red-600 dark:text-red-400">{variantsError}</div>
-              )}
-              {variantsResult?.variants?.length ? (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Proposed Variants (best-first)
+            <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard label="Atoms" value={String(residueStats.atoms)} />
+              <StatCard label="Residues" value={String(residueStats.visibleResidues)} />
+              <StatCard label="Chains" value={String(residueStats.chains)} />
+              <StatCard
+                label="Avg B-factor"
+                value={parsed.bFactorRange.average ? parsed.bFactorRange.average.toFixed(1) : '0.0'}
+              />
+            </div>
+
+            <div className="flex-1 bg-slate-950/60">
+              {error ? (
+                <div className="flex h-full items-center justify-center px-6 text-center">
+                  <div>
+                    <div className="mb-3 text-5xl">⚠️</div>
+                    <p className="text-lg font-medium text-rose-300">{error}</p>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {variantsResult.variants.slice(0, 6).map((v: any, idx: number) => (
+                </div>
+              ) : (
+                <div ref={containerRef} className="h-full w-full" />
+              )}
+            </div>
+          </div>
+
+          <aside className="flex min-h-0 flex-col overflow-y-auto bg-slate-900/95 p-4">
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Structure controls</h4>
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm text-slate-300">
+                  Chain filter
+                  <select
+                    data-testid="viewer-chain-filter"
+                    value={selectedChain}
+                    onChange={(event) => setSelectedChain(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
+                  >
+                    <option value="all">All chains</option>
+                    {parsed.chains.map((chain) => (
+                      <option key={chain} value={chain}>
+                        Chain {chain}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block text-sm text-slate-300">
+                  Focus residue
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      data-testid="viewer-focus-residue"
+                      value={focusResidue}
+                      onChange={(event) => setFocusResidue(event.target.value)}
+                      placeholder="e.g. 42 or A:42"
+                      className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
+                    />
+                    <button
+                      data-testid="viewer-focus-button"
+                      onClick={focusOnResidue}
+                      className="rounded-xl bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+                    >
+                      Focus
+                    </button>
+                  </div>
+                </label>
+
+                {analysisMessage && <p className="text-xs text-cyan-200">{analysisMessage}</p>}
+              </div>
+            </section>
+
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Selected residues</h4>
+                <button
+                  onClick={clearSelection}
+                  className="text-xs font-medium text-slate-400 transition hover:text-white"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedResidues.length > 0 ? (
+                  selectedResidues.map((selection) => (
+                    <button
+                      key={residueKey(selection.chain, selection.residueNum)}
+                      onClick={() => {
+                        const next = selectedResidues.filter(
+                          (item) =>
+                            !(item.chain === selection.chain && item.residueNum === selection.residueNum)
+                        )
+                        setSelectedResidues(next)
+                        syncPositionsFromSelection(next)
+                      }}
+                      className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-medium text-cyan-100"
+                    >
+                      {formatResidueSelection(selection)} ×
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400">Click atoms or residue markers in the viewer to build a selection.</p>
+                )}
+              </div>
+            </section>
+
+            {sequence && (
+              <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Variant proposal</h4>
+                <div className="mt-4 space-y-3">
+                  <label className="block text-sm text-slate-300">
+                    Variant positions
+                    <input
+                      aria-label="Variant positions"
+                      data-testid="variant-positions"
+                      value={positionsText}
+                      onChange={(event) => setPositionsText(event.target.value)}
+                      placeholder="1-based positions e.g. 12,15,16"
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
+                    />
+                  </label>
+                  <label className="block text-sm text-slate-300">
+                    Number of variants
+                    <input
+                      aria-label="Number of variants"
+                      data-testid="variant-num"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={numVariants}
+                      onChange={(event) => {
+                        const value = Number(event.target.value)
+                        setNumVariants(Number.isFinite(value) && value >= 1 ? Math.min(20, Math.floor(value)) : 5)
+                      }}
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
+                    />
+                  </label>
+                  <button
+                    onClick={callProposeVariants}
+                    data-testid="propose-variants"
+                    disabled={variantsRunning}
+                    className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                      variantsRunning
+                        ? 'bg-slate-700 text-slate-300'
+                        : 'bg-violet-500 text-white hover:bg-violet-400'
+                    }`}
+                  >
+                    {variantsRunning ? 'Proposing…' : 'Propose variants'}
+                  </button>
+                  <p className="text-xs text-slate-400">
+                    Use the selection list above or enter positions manually to seed sequence exploration.
+                  </p>
+                </div>
+              </section>
+            )}
+
+            {(variantsError || variantsResult?.variants?.length) && (
+              <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Proposed variants</h4>
+                {variantsError && <p className="mt-3 text-sm text-rose-300">{variantsError}</p>}
+                {variantsResult?.variants?.length ? (
+                  <div className="mt-3 space-y-3">
+                    {variantsResult.variants.slice(0, 6).map((variant: any, index: number) => (
                       <div
-                        key={idx}
-                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2"
+                        key={`${variant?.sequence || index}`}
+                        className="rounded-2xl border border-white/10 bg-slate-950/70 p-3"
                       >
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium text-gray-800 dark:text-gray-200">Score</span>
-                          <span
-                            data-testid={`variant-score-${idx}`}
-                            className="text-gray-700 dark:text-gray-300"
-                          >
-                            {String(v?.score ?? '')}
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium text-slate-200">Score</span>
+                          <span data-testid={`variant-score-${index}`} className="text-cyan-200">
+                            {String(variant?.score ?? '')}
                           </span>
                         </div>
-                        {typeof v?.sequence === 'string' && onUseSequence && (
-                          <div className="mt-2">
+                        <div
+                          data-testid={`variant-sequence-${index}`}
+                          className="mt-2 break-all font-mono text-xs text-slate-200"
+                        >
+                          {String(variant?.sequence ?? '')}
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {typeof variant?.sequence === 'string' && onUseSequence && (
                             <button
-                              data-testid={`iterate-variant-${idx}`}
+                              data-testid={`iterate-variant-${index}`}
                               onClick={() => {
-                                onUseSequence(v.sequence)
+                                onUseSequence(variant.sequence)
                                 onClose()
                               }}
-                              className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-3 rounded transition-colors"
+                              className="rounded-xl bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
                             >
                               Iterate with this
                             </button>
-                          </div>
-                        )}
-                        {typeof v?.sequence === 'string' && (
-                          <div className="mt-2">
+                          )}
+                          {typeof variant?.sequence === 'string' && (
                             <button
-                              data-testid={`save-variant-${idx}`}
+                              data-testid={`save-variant-${index}`}
                               onClick={() => {
                                 addToDesignLibrary({
-                                  sequence: v.sequence,
-                                  score: typeof v?.score === 'number' ? v.score : undefined,
-                                  positions: Array.isArray(v?.positions) ? v.positions : undefined,
+                                  sequence: variant.sequence,
+                                  score: typeof variant?.score === 'number' ? variant.score : undefined,
+                                  positions: Array.isArray(variant?.positions) ? variant.positions : undefined,
                                   source: title || '3D Viewer Variant',
                                   pdbData,
                                 })
                               }}
-                              className="w-full bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium py-2 px-3 rounded transition-colors"
+                              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                             >
                               Save to Library
                             </button>
-                          </div>
-                        )}
-                        <div
-                          data-testid={`variant-sequence-${idx}`}
-                          className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-300 break-all"
-                        >
-                          {String(v?.sequence ?? '')}
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : null}
-            </div>
-          )}
-          <div className="flex items-center gap-6 text-sm flex-wrap">
-            {renderMode === 'ribbon' || renderMode === 'cartoon' ? (
-              <>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Secondary Structure:</span>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full" style={{background: '#ff4081'}}></div>
-                  <span className="text-gray-600 dark:text-gray-400">α-Helix</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full" style={{background: '#ffd600'}}></div>
-                  <span className="text-gray-600 dark:text-gray-400">β-Sheet</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full" style={{background: '#00bcd4'}}></div>
-                  <span className="text-gray-600 dark:text-gray-400">β-Turn</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-gray-400"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Random Coil</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Element Colors:</span>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-gray-500"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Carbon</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Nitrogen</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-red-500"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Oxygen</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-yellow-400"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Sulfur</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full bg-orange-500"></div>
-                  <span className="text-gray-600 dark:text-gray-400">Phosphorus</span>
-                </div>
-              </>
+                ) : null}
+              </section>
             )}
-          </div>
+
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Legend</h4>
+              <div className="mt-3 space-y-2 text-sm text-slate-300">
+                {renderMode === 'ribbon' || renderMode === 'cartoon' ? (
+                  <>
+                    {Object.entries(SECONDARY_COLORS).map(([label, color]) => (
+                      <LegendItem key={label} label={label} color={new THREE.Color(color)} />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    {Object.entries(ELEMENT_COLORS)
+                      .filter(([key]) => key !== 'default')
+                      .map(([label, color]) => (
+                        <LegendItem key={label} label={label} color={new THREE.Color(color)} />
+                      ))}
+                  </>
+                )}
+              </div>
+            </section>
+          </aside>
         </div>
       </div>
+    </div>
+  )
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-2 text-xl font-semibold text-white">{value}</div>
+    </div>
+  )
+}
+
+function LegendItem({ label, color }: { label: string; color: THREE.Color }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: `#${color.getHexString()}` }} />
+      <span className="capitalize text-slate-300">{label}</span>
     </div>
   )
 }
