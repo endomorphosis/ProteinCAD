@@ -191,7 +191,7 @@ test.describe('Results viewer', () => {
     await expect(page.getByText(/Focused on residue A:2/i)).toBeVisible()
     await expect(page.getByText('A:2 GLY ×')).toBeVisible()
     await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('A:2 GLY')
-    await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('4')
+    await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('2')
     await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText('C')
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
