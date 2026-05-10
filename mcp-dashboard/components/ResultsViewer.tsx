@@ -153,7 +153,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-2xl font-semibold text-white">{job.job_name || job.job_id}</h3>
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
-                Completed
+                ✓ Completed
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-300">Completed {new Date(job.updated_at).toLocaleString()}</p>

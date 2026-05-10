@@ -154,10 +154,18 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
       ) : (
         <div className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
           {filteredJobs.map((job) => (
-            <button
+            <div
               key={job.job_id}
-              type="button"
               onClick={() => handleJobClick(job)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  handleJobClick(job)
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              data-testid={`job-card-${job.job_id}`}
               className={`w-full rounded-2xl border p-4 text-left transition-all duration-200 ${
                 selectedJobId === job.job_id
                   ? 'border-cyan-400/50 bg-cyan-400/10 shadow-lg shadow-cyan-950/10'
@@ -179,6 +187,7 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
                 </div>
                 <button
                   onClick={(e) => handleDelete(job.job_id, e)}
+                  aria-label={`Delete job ${job.job_name || job.job_id}`}
                   className="rounded-lg border border-rose-400/20 bg-rose-400/10 px-2.5 py-1 text-xs font-medium text-rose-200 transition hover:bg-rose-400/20"
                 >
                   Delete
@@ -205,7 +214,7 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
                   </div>
                 ))}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}

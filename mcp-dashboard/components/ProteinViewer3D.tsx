@@ -734,7 +734,6 @@ export default function ProteinViewer3D({
     }
 
     setError(null)
-    setAnalysisMessage(null)
 
     if (parsed.atoms.length === 0) {
       setError('No valid atoms found in the provided PDB data.')
@@ -880,7 +879,7 @@ export default function ProteinViewer3D({
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div>
             <div className="flex items-center gap-3">
-              <h3 className="text-2xl font-semibold text-white">3D Protein Structure Viewer</h3>
+              <h3 className="text-2xl font-semibold text-white">🔬 3D Protein Structure Viewer</h3>
               <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
                 Interactive analysis
               </span>

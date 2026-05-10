@@ -14,7 +14,6 @@ test.describe('Jobs flow', () => {
     const jobs: any[] = []
 
     page.on('dialog', async (dialog) => {
-      // Accept deletion confirmation dialogs.
       await dialog.accept()
     })
 
@@ -70,14 +69,13 @@ test.describe('Jobs flow', () => {
 
     await page.getByRole('button', { name: /Start Design Job/i }).click()
 
-    await expect(page.getByText('e2e job')).toBeVisible()
-
-    await page.getByText('e2e job').click()
+    const jobCard = page.getByTestId('job-card-job_20250101_000000_0')
+    await expect(jobCard).toBeVisible()
+    await jobCard.click()
 
     await expect(page.getByText(/Job is created/i)).toBeVisible()
 
-    // Delete the job and confirm it disappears.
-    await page.getByRole('button', { name: 'Delete' }).click()
-    await expect(page.getByText('e2e job')).toBeHidden()
+    await jobCard.getByRole('button', { name: 'Delete job e2e job' }).click()
+    await expect(jobCard).toBeHidden()
   })
 })

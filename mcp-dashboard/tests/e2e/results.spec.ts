@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { examplePdb, installMockEventSource, jsonRoute } from './helpers/mocks'
 
 function makeCompletedJob() {
@@ -30,6 +30,24 @@ function makeCompletedJob() {
   }
 }
 
+async function installCompletedJobRoutes(page: Page, job: ReturnType<typeof makeCompletedJob>) {
+  await page.route('**/api/mcp/services/status', async (route) => {
+    await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
+  })
+
+  await page.route('**/api/mcp/jobs', async (route) => {
+    if (route.request().method() === 'GET') {
+      await jsonRoute(route, [job])
+      return
+    }
+    await route.fallback()
+  })
+}
+
+async function openCompletedJob(page: Page) {
+  await page.getByTestId('job-card-job_completed_0').click()
+}
+
 test.describe('Results viewer', () => {
   test.beforeEach(async ({ page }) => {
     await installMockEventSource(page)
@@ -37,31 +55,16 @@ test.describe('Results viewer', () => {
 
   test('shows completed results + allows download', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
     await expect(page.getByText('✓ Completed')).toBeVisible()
     await expect(page.getByText('Target Structure')).toBeVisible()
-    await expect(page.getByText(/Binder Designs/i)).toBeVisible()
-
-    // Design 1 starts expanded by default
+    await expect(page.getByText(/Generated Designs/i)).toBeVisible()
     await expect(page.getByText(/Binder Sequence/i)).toBeVisible()
 
-    // Download All Results
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: /Download All Results/i }).click()
     const download = await downloadPromise
@@ -70,21 +73,10 @@ test.describe('Results viewer', () => {
 
   test('iterate from a completed job pre-fills the input form', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
     await page.getByRole('button', { name: 'Iterate From This Job' }).click()
 
@@ -94,21 +86,10 @@ test.describe('Results viewer', () => {
 
   test('3D viewer opens and closes', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
     await page.getByRole('button', { name: /View Target in 3D/i }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
@@ -119,33 +100,19 @@ test.describe('Results viewer', () => {
 
   test('3D viewer can propose sequence variants (mock tool)', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
-    // Open viewer from a design so the sequence is available.
     await page.getByRole('button', { name: /View 3D/i }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
 
-    await expect(page.getByLabel('Variant positions')).toBeVisible()
     await page.getByLabel('Variant positions').fill('1,2,3')
     await page.getByTestId('propose-variants').click()
 
-    await expect(page.getByText(/Proposed Variants/i)).toBeVisible()
+    await expect(page.getByText(/Proposed variants/i)).toBeVisible()
 
-    // Use the top variant to prefill the main form.
     const variantSequenceEl = page.getByTestId('variant-sequence-0')
     await expect(variantSequenceEl).toBeVisible()
     const variantSequence = (await variantSequenceEl.innerText()).trim()
@@ -154,27 +121,14 @@ test.describe('Results viewer', () => {
 
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
     await expect(page.getByLabel(/Target Protein Sequence/i)).toHaveValue(variantSequence)
-
-    // (modal already closed by iterate button)
   })
 
   test('saving a variant adds it to the Design Library', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
     await page.getByRole('button', { name: /View 3D/i }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
@@ -189,12 +143,11 @@ test.describe('Results viewer', () => {
     await page.getByTestId('save-variant-0').evaluate((el: HTMLElement) => el.click())
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
 
-    const lib = page.getByTestId('design-library')
-    await expect(lib).toBeVisible()
-    await expect(lib.getByText(variantSequence)).toBeVisible()
+    const library = page.getByTestId('design-library')
+    await expect(library).toBeVisible()
+    await expect(library.getByText(variantSequence)).toBeVisible()
 
-    // Saved variants include PDB data, so the library item can reopen in 3D.
-    await lib.getByRole('button', { name: 'View 3D' }).click()
+    await library.getByRole('button', { name: 'View 3D' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
@@ -202,31 +155,39 @@ test.describe('Results viewer', () => {
 
   test('saving a binder design adds it to the Design Library and can reopen 3D', async ({ page }) => {
     const job = makeCompletedJob()
-
-    await page.route('**/api/mcp/services/status', async (route) => {
-      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
-    })
-
-    await page.route('**/api/mcp/jobs', async (route) => {
-      if (route.request().method() === 'GET') {
-        await jsonRoute(route, [job])
-        return
-      }
-      await route.fallback()
-    })
+    await installCompletedJobRoutes(page, job)
 
     await page.goto('/')
-    await page.getByText('Completed Job').click()
+    await openCompletedJob(page)
 
-    // Design 1 starts expanded by default.
     await page.getByTestId('save-design-0').click()
 
-    const lib = page.getByTestId('design-library')
-    await expect(lib).toBeVisible()
+    const library = page.getByTestId('design-library')
+    await expect(library).toBeVisible()
 
-    // Reopen the saved design's structure from the library.
-    await lib.getByRole('button', { name: 'View 3D' }).click()
+    await library.getByRole('button', { name: 'View 3D' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
+  })
+
+  test('3D viewer supports chain filtering and residue focus controls', async ({ page }) => {
+    const job = makeCompletedJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    await page.getByTestId('viewer-chain-filter').selectOption('A')
+    await page.getByTestId('viewer-focus-residue').fill('A:2')
+    await page.getByTestId('viewer-focus-button').click()
+
+    await expect(page.getByText(/Focused on residue A:2/i)).toBeVisible()
+    await expect(page.getByText('A:2 GLY ×')).toBeVisible()
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()

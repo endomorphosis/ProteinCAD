@@ -1,4 +1,9 @@
-import type { Client } from '@modelcontextprotocol/sdk/dist/client/index.js'
+export type BasicMcpClient = {
+  listTools(): Promise<any>
+  listResources(): Promise<any>
+  readResource(input: { uri: string }): Promise<any>
+  callTool(input: { name: string; arguments?: Record<string, any> }): Promise<any>
+}
 
 export declare class HttpJsonRpcTransport {
   onclose?: () => void
@@ -7,7 +12,7 @@ export declare class HttpJsonRpcTransport {
   constructor(endpoint: string)
   start(): Promise<void>
   close(): Promise<void>
-  send(message: any): Promise<void>
+  send(message: any): Promise<any>
 }
 
 export declare function extractFirstTextContent(result: any): string
@@ -15,7 +20,7 @@ export declare function tryParseJson(text: string): any | null
 
 export declare function withMcpClient<T>(
   options: { baseUrl?: string; clientName?: string; clientVersion?: string } | undefined,
-  fn: (client: Client) => Promise<T>
+  fn: (client: BasicMcpClient) => Promise<T>
 ): Promise<T>
 
 export declare class McpProteinDesignClient {
