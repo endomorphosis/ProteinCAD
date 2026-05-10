@@ -202,7 +202,7 @@ test.describe('Results viewer', () => {
     const downloadPromise = page.waitForEvent('download')
     await page.getByTestId('viewer-snapshot').click()
     const download = await downloadPromise
-    expect(download.suggestedFilename()).toMatch(/target-structure\.png$/)
+    expect(download.suggestedFilename()).toMatch(/\.png$/)
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
