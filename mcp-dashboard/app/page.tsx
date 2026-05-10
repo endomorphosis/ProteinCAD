@@ -109,13 +109,13 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,2.4fr)_minmax(0,1.6fr)]">
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.8fr)]">
           <ServiceStatus />
           <AlphaFoldSettings onSettingsChanged={handleJobCreated} />
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-12">
-          <div className="space-y-6 xl:col-span-3">
+        <div className="mt-6 grid gap-6 xl:grid-cols-12 2xl:grid-cols-[minmax(0,1.12fr)_minmax(0,1.08fr)_minmax(0,1.8fr)]">
+          <div className="space-y-6 xl:col-span-4 2xl:col-span-1">
             <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
@@ -130,9 +130,12 @@ export default function Home() {
             </section>
 
             <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
-              <div className="mb-4">
-                <h2 className="text-2xl font-semibold text-white">MCP Tools</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-semibold text-white">MCP Tools</h2>
                 <p className="mt-1 text-sm text-slate-400">Inspect tool schemas and run focused operations.</p>
+                </div>
+                <span className="rounded-full bg-violet-400/10 px-3 py-1 text-xs font-medium text-violet-100">Protocol-aware</span>
               </div>
               <ToolsPanel />
             </section>
@@ -158,7 +161,7 @@ export default function Home() {
             </section>
           </div>
 
-          <div className="xl:col-span-3">
+          <div className="xl:col-span-3 2xl:col-span-1">
             <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
               <div className="mb-4">
                 <h2 className="text-2xl font-semibold text-white">Jobs</h2>
@@ -170,7 +173,7 @@ export default function Home() {
             </section>
           </div>
 
-          <div className="xl:col-span-6">
+          <div className="xl:col-span-5 2xl:col-span-1">
             <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>

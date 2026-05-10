@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { extractFirstTextContent } from '@generative-protein/mcp-js-sdk'
 
 interface AlphaFoldSettings {
@@ -16,6 +16,9 @@ interface Props {
   onSettingsChanged?: () => void
 }
 
+const fieldClassName =
+  'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20'
+
 export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
   const [settings, setSettings] = useState<AlphaFoldSettings>({})
   const [loading, setLoading] = useState(true)
@@ -25,21 +28,16 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
   const [expanded, setExpanded] = useState(false)
 
   const callTool = async (name: string, args: Record<string, any>) => {
-    const res = await fetch('/api/mcp/tools/call', {
+    const response = await fetch('/api/mcp/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, arguments: args || {} }),
     })
-    if (!res.ok) {
-      throw new Error(`Tool call failed (${res.status})`)
+    if (!response.ok) {
+      throw new Error(`Tool call failed (${response.status})`)
     }
-    return res.json()
+    return response.json()
   }
-
-  // Fetch current settings on mount
-  useEffect(() => {
-    fetchSettings()
-  }, [])
 
   const fetchSettings = async () => {
     setLoading(true)
@@ -57,11 +55,12 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
     }
   }
 
+  useEffect(() => {
+    fetchSettings()
+  }, [])
+
   const handleSettingChange = (key: keyof AlphaFoldSettings, value: any) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: value
-    }))
+    setSettings((prev) => ({ ...prev, [key]: value }))
   }
 
   const handleSave = async () => {
@@ -72,12 +71,11 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
       const result = await callTool('update_alphafold_settings', settings)
       const text = extractFirstTextContent(result)
       const parsed = JSON.parse(text)
-      
+
       if (parsed.success) {
         setSettings(parsed.settings)
         setSuccess('AlphaFold settings updated successfully')
         onSettingsChanged?.()
-        // Clear success message after 3 seconds
         setTimeout(() => setSuccess(null), 3000)
       } else {
         setError(parsed.message || 'Failed to update settings')
@@ -92,7 +90,7 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
 
   const handleReset = async () => {
     if (!confirm('Reset AlphaFold settings to defaults?')) return
-    
+
     setSaving(true)
     setError(null)
     setSuccess(null)
@@ -100,12 +98,11 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
       const result = await callTool('reset_alphafold_settings', {})
       const text = extractFirstTextContent(result)
       const parsed = JSON.parse(text)
-      
+
       if (parsed.success) {
         setSettings(parsed.settings)
         setSuccess('AlphaFold settings reset to defaults')
         onSettingsChanged?.()
-        // Clear success message after 3 seconds
         setTimeout(() => setSuccess(null), 3000)
       } else {
         setError(parsed.message || 'Failed to reset settings')
@@ -120,240 +117,238 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+      <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
         <div className="animate-pulse">
-          <div className="h-6 bg-gray-300 dark:bg-gray-600 rounded w-1/3"></div>
+          <div className="h-6 w-1/3 rounded bg-white/10" />
+          <div className="mt-3 h-4 w-2/3 rounded bg-white/5" />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+    <div className="rounded-3xl border border-white/10 bg-slate-900/70 shadow-xl shadow-slate-950/20 backdrop-blur">
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition hover:bg-white/5"
       >
-        <div className="flex items-center space-x-3">
+        <div className="flex items-start gap-3">
+          <div className="mt-1 rounded-full border border-cyan-400/20 bg-cyan-400/10 p-2 text-cyan-200">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-xl font-semibold text-white">AlphaFold Optimization Settings</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Configure speed vs quality tradeoffs and keep the structure generation pipeline tuned.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-100">
+            Up to 29% faster
+          </span>
           <svg
-            className="w-5 h-5 text-blue-600"
+            className={`h-5 w-5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
           </svg>
-          <div className="text-left">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              AlphaFold Optimization Settings
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Configure speed vs quality tradeoffs (⚡ 29% speedup available)
-            </p>
-          </div>
         </div>
-        <svg
-          className={`w-5 h-5 text-gray-500 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-        </svg>
       </button>
 
       {expanded && (
-        <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 space-y-6">
-          {/* Speed Preset */}
-          <div>
-            <label htmlFor="speed_preset" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Speed Preset
-            </label>
-            <div className="relative">
+        <div className="space-y-6 border-t border-white/10 px-6 py-5">
+          <div className="grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+              <label htmlFor="speed_preset" className="mb-2 block text-sm font-medium text-slate-200">
+                Speed Preset
+              </label>
               <select
                 id="speed_preset"
                 value={settings.speed_preset || 'balanced'}
-                onChange={(e) => handleSettingChange('speed_preset', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white appearance-none cursor-pointer"
+                onChange={(event) => handleSettingChange('speed_preset', event.target.value)}
+                className={fieldClassName}
               >
                 <option value="fast">⚡ Fast (29% faster - templates OFF, recycles=3)</option>
                 <option value="balanced">⚖️ Balanced (20% faster - templates ON, recycles=3, default)</option>
                 <option value="quality">🎯 Quality (slowest - templates ON, full recycles)</option>
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                </svg>
-              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                {settings.speed_preset === 'fast' && 'Fastest option: removes templates and reduces recycling iterations.'}
+                {settings.speed_preset === 'balanced' && 'Recommended mode for everyday structure generation and review.'}
+                {settings.speed_preset === 'quality' && 'Use when final quality matters more than runtime.'}
+              </p>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {settings.speed_preset === 'fast' && 'Fastest option: removes templates, reduces iterations'}
-              {settings.speed_preset === 'balanced' && 'Best balance of speed and quality (recommended)'}
-              {settings.speed_preset === 'quality' && 'Slowest option: maximum accuracy for research/publication'}
-            </p>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <StatTile label="Templates" value={settings.disable_templates ? 'Disabled' : 'Enabled'} />
+              <StatTile label="Recycles" value={String(settings.num_recycles ?? 'default')} />
+              <StatTile label="MSA mode" value={String(settings.msa_mode || 'mmseqs2')} />
+            </div>
           </div>
 
-          {/* Advanced Settings (Collapsible) */}
-          <details className="group">
-            <summary className="flex items-center cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300">
-              <svg className="w-4 h-4 mr-2 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <details className="group rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+            <summary className="flex cursor-pointer items-center text-sm font-semibold text-slate-200">
+              <svg className="mr-2 h-4 w-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               Advanced Settings
             </summary>
 
-            <div className="mt-4 space-y-4 pl-6 border-l-2 border-gray-200 dark:border-gray-700">
-              {/* Disable Templates */}
-              <div>
-                <label className="flex items-center space-x-3 cursor-pointer">
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <label className="flex items-center gap-3 text-sm font-medium text-slate-200">
                   <input
                     type="checkbox"
                     checked={settings.disable_templates || false}
-                    onChange={(e) => handleSettingChange('disable_templates', e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
+                    onChange={(event) => handleSettingChange('disable_templates', event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 bg-slate-950 text-cyan-400 focus:ring-cyan-400"
                   />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Disable Templates
-                  </span>
+                  Disable Templates
                 </label>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Skip PDB template search (~10% speedup, less accurate for template-dependent proteins)
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  Skip the template search for extra speed when template guidance is not required.
                 </p>
               </div>
 
-              {/* Number of Recycles */}
-              <div>
-                <label htmlFor="num_recycles" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Recycling Iterations: {settings.num_recycles || 'default'}
-                </label>
-                <input
-                  type="number"
-                  id="num_recycles"
-                  min="-1"
-                  max="50"
-                  value={settings.num_recycles ?? ''}
-                  onChange={(e) => handleSettingChange('num_recycles', e.target.value === '' ? null : parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="3 (speed) to 20 (quality)"
-                />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  3 for speed, -1 for model default (~20), higher = more iterations = slower
-                </p>
-              </div>
+              <SettingField
+                id="num_recycles"
+                label={`Recycling Iterations: ${settings.num_recycles || 'default'}`}
+                type="number"
+                value={settings.num_recycles ?? ''}
+                onChange={(value) => handleSettingChange('num_recycles', value === '' ? null : parseInt(value, 10))}
+                placeholder="3 (speed) to 20 (quality)"
+                help="3 for speed, -1 for model default (~20), higher = slower but sometimes more stable."
+              />
 
-              {/* Number of Ensemble */}
-              <div>
-                <label htmlFor="num_ensemble" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Ensemble Evaluations: {settings.num_ensemble || 'default'}
-                </label>
-                <input
-                  type="number"
-                  id="num_ensemble"
-                  min="1"
-                  max="8"
-                  value={settings.num_ensemble ?? ''}
-                  onChange={(e) => handleSettingChange('num_ensemble', e.target.value === '' ? null : parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="1 (speed) to 8 (quality)"
-                />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  1 for speed, 8 for CASP14 quality
-                </p>
-              </div>
+              <SettingField
+                id="num_ensemble"
+                label={`Ensemble Evaluations: ${settings.num_ensemble || 'default'}`}
+                type="number"
+                value={settings.num_ensemble ?? ''}
+                onChange={(value) => handleSettingChange('num_ensemble', value === '' ? null : parseInt(value, 10))}
+                placeholder="1 (speed) to 8 (quality)"
+                help="1 for speed, 8 for CASP14-style quality runs."
+              />
 
-              {/* MMseqs2 Max Sequences */}
-              <div>
-                <label htmlFor="mmseqs2_max_seqs" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  MMseqs2 Max Sequences: {settings.mmseqs2_max_seqs || 'default'}
-                </label>
-                <input
-                  type="number"
-                  id="mmseqs2_max_seqs"
-                  min="50"
-                  step="50"
-                  value={settings.mmseqs2_max_seqs ?? ''}
-                  onChange={(e) => handleSettingChange('mmseqs2_max_seqs', e.target.value === '' ? null : parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="512 (speed) to 10000 (quality)"
-                />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  512 for speed, 10000 for maximum coverage
-                </p>
-              </div>
+              <SettingField
+                id="mmseqs2_max_seqs"
+                label={`MMseqs2 Max Sequences: ${settings.mmseqs2_max_seqs || 'default'}`}
+                type="number"
+                value={settings.mmseqs2_max_seqs ?? ''}
+                onChange={(value) => handleSettingChange('mmseqs2_max_seqs', value === '' ? null : parseInt(value, 10))}
+                placeholder="512 (speed) to 10000 (quality)"
+                help="Lower values favor speed; higher values improve coverage and sensitivity."
+              />
 
-              {/* MSA Mode */}
-              <div>
-                <label htmlFor="msa_mode" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 lg:col-span-2">
+                <label htmlFor="msa_mode" className="mb-2 block text-sm font-medium text-slate-200">
                   MSA Generation Mode
                 </label>
-                <div className="relative">
-                  <select
-                    id="msa_mode"
-                    value={settings.msa_mode || 'mmseqs2'}
-                    onChange={(e) => handleSettingChange('msa_mode', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white appearance-none cursor-pointer"
-                  >
-                    <option value="mmseqs2">MMseqs2 (faster, requires database)</option>
-                    <option value="jackhmmer">JackHMMER (slower, more compatible)</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                    </svg>
-                  </div>
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  MMseqs2 is faster but requires a prepared database
+                <select
+                  id="msa_mode"
+                  value={settings.msa_mode || 'mmseqs2'}
+                  onChange={(event) => handleSettingChange('msa_mode', event.target.value)}
+                  className={fieldClassName}
+                >
+                  <option value="mmseqs2">MMseqs2 (faster, requires database)</option>
+                  <option value="jackhmmer">JackHMMER (slower, more compatible)</option>
+                </select>
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  MMseqs2 is faster in prepared environments; JackHMMER is more portable when databases differ.
                 </p>
               </div>
             </div>
           </details>
 
-          {/* Messages */}
           {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-            </div>
+            <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">{error}</div>
           )}
 
           {success && (
-            <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-              <p className="text-sm text-green-700 dark:text-green-400">{success}</p>
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+              {success}
             </div>
           )}
 
-          {/* Buttons */}
-          <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-md transition-colors"
-            >
-              {saving ? 'Saving...' : 'Save Settings'}
-            </button>
-            <button
-              onClick={handleReset}
-              disabled={saving}
-              className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-900 dark:text-white font-medium rounded-md transition-colors"
-            >
-              Reset to Defaults
-            </button>
-          </div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex gap-3 lg:w-[360px]">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 rounded-2xl bg-gradient-to-r from-cyan-400 to-violet-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save Settings'}
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={saving}
+                className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Reset to Defaults
+              </button>
+            </div>
 
-          {/* Current Settings Display */}
-          <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded-md">
-            <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Current Settings (JSON):</p>
-            <pre className="text-xs text-gray-700 dark:text-gray-300 overflow-auto max-h-32">
-              {JSON.stringify(settings, null, 2)}
-            </pre>
+            <div className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Current Settings (JSON)</p>
+              <pre className="max-h-40 overflow-auto text-xs text-cyan-100">{JSON.stringify(settings, null, 2)}</pre>
+            </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-2 text-sm font-medium text-slate-100">{value}</div>
+    </div>
+  )
+}
+
+function SettingField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  help,
+  type,
+}: {
+  id: string
+  label: string
+  value: string | number
+  onChange: (value: string) => void
+  placeholder: string
+  help: string
+  type: 'number' | 'text'
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <label htmlFor={id} className="mb-2 block text-sm font-medium text-slate-200">
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={fieldClassName}
+        placeholder={placeholder}
+      />
+      <p className="mt-2 text-xs leading-5 text-slate-400">{help}</p>
     </div>
   )
 }
