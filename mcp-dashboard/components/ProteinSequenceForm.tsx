@@ -27,7 +27,7 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
   const prefillNumDesigns = prefill?.num_designs
 
   useEffect(() => {
-    if (!prefill) return
+    if (prefillSequence === undefined && prefillNumDesigns === undefined) return
 
     setFormData((prev) => ({
       ...prev,
@@ -37,7 +37,7 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
           ? prefillNumDesigns
           : prev.num_designs,
     }))
-  }, [prefill, prefillNumDesigns, prefillSequence])
+  }, [prefillNumDesigns, prefillSequence])
 
   const sequenceStats = useMemo(() => {
     const normalized = formData.sequence.replace(/\s+/g, '')

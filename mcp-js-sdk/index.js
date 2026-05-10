@@ -7,7 +7,7 @@ function defaultBaseUrl() {
   return String(base).replace(/\/$/, '')
 }
 
-let fallbackRpcCounter = 0
+let FALLBACK_RPC_COUNTER = 0
 
 function rpcPayload(method, params) {
   return {
@@ -15,7 +15,7 @@ function rpcPayload(method, params) {
     id:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
-        : `${method}-${Date.now()}-${fallbackRpcCounter++}`,
+        : `${method}-${Date.now()}-${FALLBACK_RPC_COUNTER++}`,
     method,
     params,
   }
