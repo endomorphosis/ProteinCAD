@@ -186,8 +186,13 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-focus-residue').fill('A:2')
     await page.getByTestId('viewer-focus-button').click()
 
+    const modalBox = await page.getByTestId('viewer-modal').boundingBox()
+    expect(modalBox?.width || 0).toBeGreaterThan(1000)
     await expect(page.getByText(/Focused on residue A:2/i)).toBeVisible()
     await expect(page.getByText('A:2 GLY ×')).toBeVisible()
+    await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('A:2 GLY')
+    await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('4')
+    await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText('C')
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()

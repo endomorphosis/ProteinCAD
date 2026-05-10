@@ -78,12 +78,20 @@ export default function ResultsViewer({ job, onIterate }: Props) {
       const pdbData = extractPDB(design.complex_structure)
       const diff = calculateSequenceDiff(inputSequence, sequence)
       const bindingScore = stableScore(sequence, design.design_id)
+      const lengthDelta = inputSequence ? sequence.length - inputSequence.length : null
+      const sameLength = Boolean(inputSequence) && inputSequence.length === sequence.length
       return {
         ...design,
         sequence,
         pdbData,
         diff,
         bindingScore,
+        lengthDelta,
+        referenceMatch:
+          sameLength && sequence.length > 0
+            ? `${Math.round(((sequence.length - diff.length) / sequence.length) * 100)}%`
+            : 'n/a',
+        structureStatus: pdbData.trim() ? 'Ready' : 'Missing',
       }
     })
   }, [inputSequence, job.results?.designs])
@@ -193,7 +201,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                 <p className="text-sm text-slate-400">Reference structure used for binder generation.</p>
               </div>
               <button
-                onClick={() => view3D(targetPdb, 'Target Structure')}
+                onClick={() => view3D(targetPdb, 'Target Structure', inputSequence || undefined)}
                 disabled={!targetPdb.trim()}
                 className="rounded-xl bg-violet-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
               >
@@ -312,6 +320,19 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                                     : 'Input sequence unavailable for comparison.'}
                                 </p>
                               )}
+                            </div>
+
+                            <div className="grid gap-2 sm:grid-cols-3">
+                              <CompactStat
+                                label="Δ length"
+                                value={
+                                  design.lengthDelta === null
+                                    ? 'n/a'
+                                    : `${design.lengthDelta > 0 ? '+' : ''}${design.lengthDelta} aa`
+                                }
+                              />
+                              <CompactStat label="Reference match" value={design.referenceMatch} />
+                              <CompactStat label="3D structure" value={design.structureStatus} />
                             </div>
 
                             <div className="grid gap-2 sm:grid-cols-2">
@@ -552,5 +573,14 @@ function DesignPill({
     <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass}`}>
       {label}: {value}
     </span>
+  )
+}
+
+function CompactStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-2 text-sm font-semibold text-slate-100">{value}</div>
+    </div>
   )
 }

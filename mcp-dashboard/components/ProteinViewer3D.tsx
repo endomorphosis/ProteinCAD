@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { addToDesignLibrary } from '@/lib/design-library'
@@ -510,6 +511,29 @@ function formatResidueSelection(selection: ResidueSelection) {
   return `${selection.chain}:${selection.residueNum} ${selection.residue}`
 }
 
+function formatResidueRanges(values: number[]) {
+  if (values.length === 0) return 'None'
+
+  const unique = Array.from(new Set(values)).sort((a, b) => a - b)
+  const ranges: string[] = []
+  let start = unique[0]
+  let end = unique[0]
+
+  for (let index = 1; index < unique.length; index += 1) {
+    const value = unique[index]
+    if (value === end + 1) {
+      end = value
+      continue
+    }
+    ranges.push(start === end ? String(start) : `${start}-${end}`)
+    start = value
+    end = value
+  }
+
+  ranges.push(start === end ? String(start) : `${start}-${end}`)
+  return ranges.join(', ')
+}
+
 export default function ProteinViewer3D({
   pdbData,
   onClose,
@@ -540,6 +564,62 @@ export default function ProteinViewer3D({
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
+
+  const selectedResidueDetails = useMemo(
+    () =>
+      selectedResidues
+        .map((selection) => {
+          const residue = parsed.residues.find(
+            (item) => item.chain === selection.chain && item.residueNum === selection.residueNum
+          )
+          if (!residue) return null
+
+          return {
+            ...selection,
+            atomCount: residue.atoms.length,
+            avgBFactor: residue.avgBFactor,
+            sequenceResidue:
+              sequence && selection.residueNum >= 1 && selection.residueNum <= sequence.length
+                ? sequence[selection.residueNum - 1]
+                : undefined,
+            center: residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center.clone(),
+          }
+        })
+        .filter(Boolean) as Array<
+        ResidueSelection & {
+          atomCount: number
+          avgBFactor: number
+          sequenceResidue?: string
+          center: THREE.Vector3
+        }
+      >,
+    [parsed.residues, selectedResidues, sequence]
+  )
+
+  const selectionSummary = useMemo(() => {
+    if (selectedResidueDetails.length === 0) return null
+
+    const positions = selectedResidueDetails.map((item) => item.residueNum)
+    let maxDistance = 0
+    for (let left = 0; left < selectedResidueDetails.length; left += 1) {
+      for (let right = left + 1; right < selectedResidueDetails.length; right += 1) {
+        maxDistance = Math.max(
+          maxDistance,
+          selectedResidueDetails[left].center.distanceTo(selectedResidueDetails[right].center)
+        )
+      }
+    }
+
+    return {
+      count: selectedResidueDetails.length,
+      primary: selectedResidueDetails[selectedResidueDetails.length - 1],
+      ranges: formatResidueRanges(positions),
+      averageBFactor:
+        selectedResidueDetails.reduce((sum, item) => sum + item.avgBFactor, 0) /
+        selectedResidueDetails.length,
+      maxDistance,
+    }
+  }, [selectedResidueDetails])
 
   const visibleResidues = useMemo(
     () =>
@@ -878,9 +958,12 @@ export default function ProteinViewer3D({
     chains: parsed.chains.length,
   }
 
-  return (
+  const viewerContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
-      <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-900 shadow-2xl shadow-slate-950/40">
+      <div
+        data-testid="viewer-modal"
+        className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-900 shadow-2xl shadow-slate-950/40"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div>
             <div className="flex items-center gap-3">
@@ -906,8 +989,8 @@ export default function ProteinViewer3D({
           </button>
         </div>
 
-        <div className="grid flex-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="flex min-h-0 flex-col border-b border-white/10 xl:border-b-0 xl:border-r">
+        <div className="grid flex-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="flex min-h-0 min-w-0 flex-col border-b border-white/10 xl:border-b-0 xl:border-r">
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
               {([
                 ['ribbon', 'Ribbon'],
@@ -974,7 +1057,7 @@ export default function ProteinViewer3D({
             </div>
           </div>
 
-          <aside className="flex min-h-0 flex-col overflow-y-auto bg-slate-900/95 p-4">
+          <aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto bg-slate-900/95 p-4">
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Structure controls</h4>
               <div className="mt-4 space-y-3">
@@ -1017,6 +1100,79 @@ export default function ProteinViewer3D({
 
                 {analysisMessage && <p className="text-xs text-cyan-200">{analysisMessage}</p>}
               </div>
+            </section>
+
+            <section
+              data-testid="viewer-residue-inspector"
+              className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Residue inspector</h4>
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                  {selectionSummary ? `${selectionSummary.count} selected` : 'No selection'}
+                </span>
+              </div>
+
+              {selectionSummary ? (
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/5 p-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-cyan-100">Active residue</div>
+                    <div
+                      data-testid="viewer-inspector-primary"
+                      className="mt-2 text-base font-semibold text-white"
+                    >
+                      {formatResidueSelection(selectionSummary.primary)}
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <InspectorStat
+                        label="Atom count"
+                        value={String(selectionSummary.primary.atomCount)}
+                        testId="viewer-selected-atom-count"
+                      />
+                      <InspectorStat
+                        label="Avg B-factor"
+                        value={selectionSummary.primary.avgBFactor.toFixed(1)}
+                        testId="viewer-selected-bfactor"
+                      />
+                      <InspectorStat
+                        label="Sequence residue"
+                        value={selectionSummary.primary.sequenceResidue || 'n/a'}
+                        testId="viewer-selected-sequence-residue"
+                      />
+                      <InspectorStat
+                        label="Selected range"
+                        value={selectionSummary.ranges}
+                        testId="viewer-selection-range"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <InspectorStat
+                      label="Selection size"
+                      value={`${selectionSummary.count} residue${selectionSummary.count === 1 ? '' : 's'}`}
+                    />
+                    <InspectorStat
+                      label="Max span"
+                      value={
+                        selectionSummary.count > 1
+                          ? `${selectionSummary.maxDistance.toFixed(1)} Å`
+                          : 'Select 2+ residues'
+                      }
+                    />
+                  </div>
+
+                  <p className="text-xs leading-5 text-slate-400">
+                    The inspector follows the latest focused or clicked residue and keeps a compact summary
+                    of the current selection for fast structural review.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-400">
+                  Focus a residue or click markers in the viewer to inspect atom counts, sequence mapping,
+                  and selection span.
+                </p>
+              )}
             </section>
 
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -1193,6 +1349,8 @@ export default function ProteinViewer3D({
       </div>
     </div>
   )
+
+  return typeof document === 'undefined' ? viewerContent : createPortal(viewerContent, document.body)
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -1209,6 +1367,25 @@ function LegendItem({ label, color }: { label: string; color: THREE.Color }) {
     <div className="flex items-center gap-2">
       <span className="h-3 w-3 rounded-full" style={{ backgroundColor: `#${color.getHexString()}` }} />
       <span className="capitalize text-slate-300">{label}</span>
+    </div>
+  )
+}
+
+function InspectorStat({
+  label,
+  value,
+  testId,
+}: {
+  label: string
+  value: string
+  testId?: string
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div data-testid={testId} className="mt-2 text-sm font-medium text-slate-100">
+        {value}
+      </div>
     </div>
   )
 }
