@@ -179,6 +179,9 @@ export default function ToolsPanel() {
     return 'border-slate-400/20 bg-slate-400/10 text-slate-200'
   }
 
+  const selectedToolArgCount = Object.keys(selectedTool?.inputSchema?.properties || {}).length
+  const selectedToolRequiredCount = selectedTool?.inputSchema?.required?.length || 0
+
   const renderPrettyResult = () => {
     if (!resultObj) return null
 
@@ -309,125 +312,145 @@ export default function ToolsPanel() {
         </div>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SummaryCard label="Selected tool" value={selectedToolName || 'None'} />
+        <SummaryCard label="Arguments" value={String(selectedToolArgCount)} />
+        <SummaryCard label="Required" value={String(selectedToolRequiredCount)} />
+      </div>
+
       {error && (
         <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">
           {error}
         </div>
       )}
 
-      <div>
-        <label htmlFor="mcp-tool-select" className="mb-1.5 block text-sm font-medium text-slate-200">
-          Tool
-        </label>
-        <select
-          id="mcp-tool-select"
-          value={selectedToolName}
-          onChange={(event) => setSelectedToolName(event.target.value)}
-          className={fieldClassName}
-        >
-          {tools.map((tool) => (
-            <option key={tool.name} value={tool.name}>
-              {tool.name}
-            </option>
-          ))}
-        </select>
-        {selectedTool?.description && (
-          <p className="mt-2 text-xs leading-5 text-slate-400">{selectedTool.description}</p>
-        )}
-      </div>
+      <details className="group rounded-2xl border border-white/10 bg-slate-950/40 p-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-100">Advanced manual tool call</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Choose any tool, edit its arguments, and run a focused protocol call.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 transition group-open:rotate-180">⌄</span>
+        </summary>
 
-      <div className="flex items-center justify-between gap-4">
-        <label htmlFor={rawMode ? 'mcp-raw-args' : undefined} className="text-sm font-medium text-slate-200">
-          Arguments
-        </label>
-        <label htmlFor="mcp-raw-mode" className="flex items-center gap-2 text-xs text-slate-400">
-          <input
-            id="mcp-raw-mode"
-            type="checkbox"
-            checked={rawMode}
-            onChange={(event) => setRawMode(event.target.checked)}
-            className="h-4 w-4 rounded border-white/20 bg-slate-950 text-cyan-400 focus:ring-cyan-400"
-          />
-          Raw JSON
-        </label>
-      </div>
+        <div className="mt-4 space-y-4">
+          <div>
+            <label htmlFor="mcp-tool-select" className="mb-1.5 block text-sm font-medium text-slate-200">
+              Tool
+            </label>
+            <select
+              id="mcp-tool-select"
+              value={selectedToolName}
+              onChange={(event) => setSelectedToolName(event.target.value)}
+              className={fieldClassName}
+            >
+              {tools.map((tool) => (
+                <option key={tool.name} value={tool.name}>
+                  {tool.name}
+                </option>
+              ))}
+            </select>
+            {selectedTool?.description && (
+              <p className="mt-2 text-xs leading-5 text-slate-400">{selectedTool.description}</p>
+            )}
+          </div>
 
-      {!rawMode && (
-        <div className="space-y-3">
-          {Object.entries(selectedTool?.inputSchema?.properties || {}).length === 0 && (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-3 py-4 text-xs text-slate-400">
-              No arguments
+          <div className="flex items-center justify-between gap-4">
+            <label htmlFor={rawMode ? 'mcp-raw-args' : undefined} className="text-sm font-medium text-slate-200">
+              Arguments
+            </label>
+            <label htmlFor="mcp-raw-mode" className="flex items-center gap-2 text-xs text-slate-400">
+              <input
+                id="mcp-raw-mode"
+                type="checkbox"
+                checked={rawMode}
+                onChange={(event) => setRawMode(event.target.checked)}
+                className="h-4 w-4 rounded border-white/20 bg-slate-950 text-cyan-400 focus:ring-cyan-400"
+              />
+              Raw JSON
+            </label>
+          </div>
+
+          {!rawMode && (
+            <div className="space-y-3">
+              {Object.entries(selectedTool?.inputSchema?.properties || {}).length === 0 && (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-3 py-4 text-xs text-slate-400">
+                  No arguments
+                </div>
+              )}
+
+              {Object.entries(selectedTool?.inputSchema?.properties || {}).map(([key, schema]) => {
+                const schemaType = schema?.type || 'string'
+                const required = (selectedTool?.inputSchema?.required || []).includes(key)
+                const fieldId = `mcp-arg-${safeIdSuffix(key)}`
+
+                if (schemaType === 'integer' || schemaType === 'number') {
+                  return (
+                    <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
+                      <input
+                        id={fieldId}
+                        type="number"
+                        value={args[key] ?? ''}
+                        onChange={(event) => handleArgChange(key, event.target.value === '' ? '' : Number(event.target.value))}
+                        className={fieldClassName}
+                      />
+                    </FieldShell>
+                  )
+                }
+
+                if (schemaType === 'array') {
+                  return (
+                    <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''} (JSON array)`} description={schema?.description}>
+                      <textarea
+                        id={fieldId}
+                        rows={3}
+                        value={JSON.stringify(args[key] ?? [], null, 2)}
+                        onChange={(event) => {
+                          const parsed = safeJsonParse(event.target.value)
+                          handleArgChange(key, parsed ?? event.target.value)
+                        }}
+                        className={`${fieldClassName} font-mono text-xs`}
+                      />
+                    </FieldShell>
+                  )
+                }
+
+                return (
+                  <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
+                    <textarea
+                      id={fieldId}
+                      rows={schema?.description?.toLowerCase().includes('pdb') ? 6 : 2}
+                      value={args[key] ?? ''}
+                      onChange={(event) => handleArgChange(key, event.target.value)}
+                      className={`${fieldClassName} font-mono text-xs`}
+                    />
+                  </FieldShell>
+                )
+              })}
             </div>
           )}
 
-          {Object.entries(selectedTool?.inputSchema?.properties || {}).map(([key, schema]) => {
-            const schemaType = schema?.type || 'string'
-            const required = (selectedTool?.inputSchema?.required || []).includes(key)
-            const fieldId = `mcp-arg-${safeIdSuffix(key)}`
+          {rawMode && (
+            <textarea
+              id="mcp-raw-args"
+              rows={10}
+              value={rawArgsText}
+              onChange={(event) => setRawArgsText(event.target.value)}
+              className={`${fieldClassName} font-mono text-xs`}
+            />
+          )}
 
-            if (schemaType === 'integer' || schemaType === 'number') {
-              return (
-                <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
-                  <input
-                    id={fieldId}
-                    type="number"
-                    value={args[key] ?? ''}
-                    onChange={(event) => handleArgChange(key, event.target.value === '' ? '' : Number(event.target.value))}
-                    className={fieldClassName}
-                  />
-                </FieldShell>
-              )
-            }
-
-            if (schemaType === 'array') {
-              return (
-                <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''} (JSON array)`} description={schema?.description}>
-                  <textarea
-                    id={fieldId}
-                    rows={3}
-                    value={JSON.stringify(args[key] ?? [], null, 2)}
-                    onChange={(event) => {
-                      const parsed = safeJsonParse(event.target.value)
-                      handleArgChange(key, parsed ?? event.target.value)
-                    }}
-                    className={`${fieldClassName} font-mono text-xs`}
-                  />
-                </FieldShell>
-              )
-            }
-
-            return (
-              <FieldShell key={key} fieldId={fieldId} label={`${key}${required ? ' *' : ''}`} description={schema?.description}>
-                <textarea
-                  id={fieldId}
-                  rows={schema?.description?.toLowerCase().includes('pdb') ? 6 : 2}
-                  value={args[key] ?? ''}
-                  onChange={(event) => handleArgChange(key, event.target.value)}
-                  className={`${fieldClassName} font-mono text-xs`}
-                />
-              </FieldShell>
-            )
-          })}
+          <button
+            onClick={() => void callTool()}
+            disabled={running || !selectedToolName}
+            className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {running ? 'Running…' : 'Run Tool'}
+          </button>
         </div>
-      )}
-
-      {rawMode && (
-        <textarea
-          id="mcp-raw-args"
-          rows={10}
-          value={rawArgsText}
-          onChange={(event) => setRawArgsText(event.target.value)}
-          className={`${fieldClassName} font-mono text-xs`}
-        />
-      )}
-
-      <button
-        onClick={() => void callTool()}
-        disabled={running || !selectedToolName}
-        className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {running ? 'Running…' : 'Run Tool'}
-      </button>
+      </details>
 
       {renderPrettyResult()}
 
@@ -439,6 +462,15 @@ export default function ToolsPanel() {
           </pre>
         </div>
       )}
+    </div>
+  )
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-2 truncate text-sm font-medium text-slate-100">{value}</div>
     </div>
   )
 }

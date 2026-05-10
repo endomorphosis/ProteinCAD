@@ -10,9 +10,21 @@ interface Props {
 }
 
 const exampleSequences = [
-  'Helical binder',
-  'Membrane target',
-  'Antibody loop',
+  {
+    label: 'Helical binder',
+    sequence: 'MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGE',
+    numDesigns: 6,
+  },
+  {
+    label: 'Membrane target',
+    sequence: 'MNNRWLFSTNHKDIGTLYLLFGAWAGVLGTALSLLIRAEL',
+    numDesigns: 4,
+  },
+  {
+    label: 'Antibody loop',
+    sequence: 'QVQLQESGPGLVKPSQTLSLTCTVSGGSISSYYWSWIRQP',
+    numDesigns: 8,
+  },
 ]
 
 export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
@@ -48,6 +60,23 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
     }
   }, [formData.sequence])
 
+  const applyExample = (example: (typeof exampleSequences)[number]) => {
+    setFormData((prev) => ({
+      ...prev,
+      sequence: example.sequence,
+      num_designs: example.numDesigns,
+      job_name: prev.job_name || example.label,
+    }))
+  }
+
+  const handleDesignCountChange = (value: string) => {
+    const parsed = parseInt(value, 10)
+    setFormData((prev) => ({
+      ...prev,
+      num_designs: Number.isFinite(parsed) ? parsed : prev.num_designs,
+    }))
+  }
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setLoading(true)
@@ -71,15 +100,23 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {exampleSequences.map((label) => (
-          <span
-            key={label}
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300"
-          >
-            {label}
-          </span>
-        ))}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Starter sequences</p>
+          <span className="text-xs text-slate-500">Load a sample with one click</span>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {exampleSequences.map((example) => (
+            <button
+              key={example.label}
+              type="button"
+              onClick={() => applyExample(example)}
+              className="rounded-full border border-white/10 bg-slate-950/60 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-100"
+            >
+              {example.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>
@@ -125,7 +162,7 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
           type="number"
           id="num_designs"
           value={formData.num_designs}
-          onChange={(event) => setFormData({ ...formData, num_designs: parseInt(event.target.value, 10) })}
+          onChange={(event) => handleDesignCountChange(event.target.value)}
           min="1"
           max="20"
           className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"

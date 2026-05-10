@@ -89,6 +89,18 @@ export default function ServiceStatus() {
     return 'bg-rose-400/10 text-rose-100 border-rose-400/20'
   }
 
+  const getServiceEndpointLabel = (url: string) => {
+    if (!url) return 'No endpoint'
+    if (url.startsWith('mock://')) return url.replace('mock://', 'mock · ')
+
+    try {
+      const parsed = new URL(url)
+      return `${parsed.hostname}${parsed.pathname === '/' ? '' : parsed.pathname}`
+    } catch {
+      return url
+    }
+  }
+
   if (loading) {
     return (
       <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-xl shadow-slate-950/20 backdrop-blur">
@@ -133,13 +145,16 @@ export default function ServiceStatus() {
       )}
 
       {status && (
-        <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {Object.entries(status).map(([service, info]) => (
             <div key={service} data-testid={`service-card-${service}`} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-white break-words">{service}</p>
-                  <p className="mt-1 text-xs text-slate-500 break-all">{info.url}</p>
+                  <p className="mt-1 text-xs text-slate-500">Endpoint</p>
+                  <p className="mt-1 truncate text-xs text-slate-300" title={info.url}>
+                    {getServiceEndpointLabel(info.url)}
+                  </p>
                 </div>
                 <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyles(info.status)}`}>
                   {info.status}
