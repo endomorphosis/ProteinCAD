@@ -669,6 +669,42 @@ export default function ProteinViewer3D({
     }
   }, [selectedResidueDetails])
 
+  const selectionAnalytics = useMemo(() => {
+    if (selectedResidueDetails.length === 0) return null
+
+    const chains = Array.from(new Set(selectedResidueDetails.map((item) => item.chain)))
+    const labels = selectedResidueDetails.map((item) => formatResidueSelection(item))
+    let farthestPair:
+      | {
+          left: string
+          right: string
+          distance: number
+        }
+      | null = null
+
+    for (let left = 0; left < selectedResidueDetails.length; left += 1) {
+      for (let right = left + 1; right < selectedResidueDetails.length; right += 1) {
+        const distance = selectedResidueDetails[left].center.distanceTo(selectedResidueDetails[right].center)
+        if (!farthestPair || distance > farthestPair.distance) {
+          farthestPair = {
+            left: formatResidueSelection(selectedResidueDetails[left]),
+            right: formatResidueSelection(selectedResidueDetails[right]),
+            distance,
+          }
+        }
+      }
+    }
+
+    return {
+      chains,
+      labels,
+      averageBFactor:
+        selectedResidueDetails.reduce((sum, item) => sum + item.avgBFactor, 0) /
+        selectedResidueDetails.length,
+      farthestPair,
+    }
+  }, [selectedResidueDetails])
+
   const visibleResidues = useMemo(
     () =>
       parsed.residues.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain),
@@ -808,6 +844,17 @@ export default function ProteinViewer3D({
         ? `Copied variant positions ${positionsText}.`
         : `Variant positions ready to copy: ${positionsText}.`
     )
+  }
+
+  const copySelectedResidues = async () => {
+    if (!selectionAnalytics || selectionAnalytics.labels.length === 0) {
+      setAnalysisMessage('Select residues before copying residue labels.')
+      return
+    }
+
+    const text = selectionAnalytics.labels.join(', ')
+    const copied = await copyTextToClipboard(text)
+    setAnalysisMessage(copied ? `Copied selected residues ${text}.` : `Selected residues ready to copy: ${text}.`)
   }
 
   const frameCurrentMolecule = (box: THREE.Box3) => {
@@ -1331,7 +1378,7 @@ export default function ProteinViewer3D({
                   </div>
                 </label>
 
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   <button
                     data-testid="viewer-hotspots-3"
                     onClick={() => selectHotspots(3)}
@@ -1345,6 +1392,13 @@ export default function ProteinViewer3D({
                     className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                   >
                     Copy positions
+                  </button>
+                  <button
+                    data-testid="viewer-copy-residues"
+                    onClick={copySelectedResidues}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Copy residues
                   </button>
                 </div>
 
@@ -1485,6 +1539,49 @@ export default function ProteinViewer3D({
                 </p>
               )}
             </section>
+
+            {selectionAnalytics && (
+              <section data-testid="viewer-selection-analytics" className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Selection analytics</h4>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Review chain spread and the widest measured pair inside the current residue set.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                    {selectionAnalytics.labels.length} labels
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <InspectorStat
+                    label="Chains involved"
+                    value={selectionAnalytics.chains.join(', ')}
+                    testId="viewer-selection-chains"
+                  />
+                  <InspectorStat
+                    label="Selection avg B-factor"
+                    value={selectionAnalytics.averageBFactor.toFixed(1)}
+                    testId="viewer-selection-average-bfactor"
+                  />
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Widest pair</div>
+                  {selectionAnalytics.farthestPair ? (
+                    <>
+                      <div data-testid="viewer-selection-pair" className="mt-2 text-sm font-medium text-slate-100">
+                        {selectionAnalytics.farthestPair.left} ↔ {selectionAnalytics.farthestPair.right}
+                      </div>
+                      <div data-testid="viewer-selection-distance" className="mt-1 text-xs text-slate-400">
+                        {selectionAnalytics.farthestPair.distance.toFixed(1)} Å
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-2 text-sm text-slate-400">Select at least two residues to measure a pair distance.</div>
+                  )}
+                </div>
+              </section>
+            )}
 
             {sequenceMapEntries.length > 0 && (
               <section data-testid="viewer-sequence-map" className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">

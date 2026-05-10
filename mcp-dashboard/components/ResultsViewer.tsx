@@ -165,6 +165,11 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   }, [inputSequence, job.results?.designs])
 
   const topDesign = designs[0]
+  const topDesigns = useMemo(() => {
+    return [...designs]
+      .sort((left, right) => Number(right.bindingScore) - Number(left.bindingScore))
+      .slice(0, 3)
+  }, [designs])
 
   if (job.status === 'failed') {
     return (
@@ -260,7 +265,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
         <div className="space-y-6">
           <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -320,12 +325,47 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                   Expand a design to inspect sequence changes, downloads, and structural viewing options.
                 </p>
               </div>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
-                {designs.length} generated
-              </span>
-            </div>
-            <div className="space-y-3">
-              {designs.map((design) => {
+                <span className="rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
+                  {designs.length} generated
+                </span>
+              </div>
+              {topDesigns.length > 0 && (
+                <div className="mb-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                  {topDesigns.map((design, index) => (
+                    <button
+                      key={`spotlight-${design.design_id}`}
+                      type="button"
+                      data-testid={`design-spotlight-${design.design_id}`}
+                      onClick={() => setExpandedDesign(design.design_id)}
+                      className="rounded-3xl border border-white/10 bg-white/5 p-4 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+                          #{index + 1} spotlight
+                        </span>
+                        <span className="text-xs font-medium text-slate-400">{design.structureStatus}</span>
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-base font-semibold text-white">Design {design.design_id + 1}</div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {design.sequence.length || 0} aa · {design.structureSummary.chains.length || 0} chain
+                          {design.structureSummary.chains.length === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <CompactStat label="Score" value={design.bindingScore} />
+                        <CompactStat label="Mutations" value={String(design.diff.length)} />
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-300">
+                        <span>Match {design.referenceMatch}</span>
+                        <span>{design.structureSummary.atoms} atoms</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-3">
+                {designs.map((design) => {
                 const isExpanded = expandedDesign === design.design_id
                 const numericBindingScore = Number(design.bindingScore)
                 return (
@@ -529,7 +569,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
           </section>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 2xl:sticky 2xl:top-0 2xl:self-start">
           <section
             data-testid="design-library"
             className="rounded-3xl border border-white/10 bg-slate-950/40 p-4"

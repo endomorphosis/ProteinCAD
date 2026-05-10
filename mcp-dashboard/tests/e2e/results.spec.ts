@@ -240,6 +240,22 @@ test.describe('Results viewer', () => {
     await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe(job.input.sequence)
   })
 
+  test('results workspace keeps the design library readable on desktop widths', async ({ page }) => {
+    const job = makeCompletedJob()
+    await installCompletedJobRoutes(page, job)
+    await page.setViewportSize({ width: 1440, height: 1400 })
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByTestId('save-design-0').click()
+
+    const libraryBox = await page.getByTestId('design-library').boundingBox()
+    expect(libraryBox?.width || 0).toBeGreaterThan(300)
+
+    await expect(page.getByTestId('design-spotlight-0')).toBeVisible()
+  })
+
   test('3D viewer supports chain filtering and residue focus controls', async ({ page }) => {
     const job = makeCompletedJob()
     await installCompletedJobRoutes(page, job)
@@ -297,6 +313,14 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-copy-positions').click()
     await expect(page.getByText(/Copied variant positions 9,10/i)).toBeVisible()
     await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('9,10')
+
+    await page.getByTestId('viewer-copy-residues').click()
+    await expect(page.getByTestId('viewer-selection-chains')).toHaveText('B')
+    await expect(page.getByTestId('viewer-selection-pair')).toContainText('B:9 SER')
+    await expect(page.getByTestId('viewer-selection-pair')).toContainText('B:10 TYR')
+    await expect(page.getByTestId('viewer-selection-distance')).toContainText('Å')
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:9 SER/)
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:10 TYR/)
 
     await page.getByTestId('viewer-chain-solo-B').click()
     await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('all')
