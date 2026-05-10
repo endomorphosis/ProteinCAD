@@ -135,7 +135,9 @@ export default function ToolsPanel() {
       }
 
       const result: CallToolResult = payload
-      const text = result?.content?.find((entry) => entry.type === 'text')?.text
+      const text = Array.isArray(result?.content)
+        ? result.content.find((entry) => entry.type === 'text')?.text
+        : undefined
       const parsed = text ? safeJsonParse(text) : null
 
       if (result?.isError) {

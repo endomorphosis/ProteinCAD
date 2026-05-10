@@ -32,7 +32,7 @@ export default function ServiceStatus() {
   const warnings = useMemo(() => {
     if (!status || typeof status !== 'object') return []
 
-    const nextWarnings: Array<{ key: string; message: string; detail?: string }> = []
+    const collectedWarnings: Array<{ key: string; message: string; detail?: string }> = []
     for (const [service, info] of Object.entries(status)) {
       if (!info || typeof info !== 'object') continue
 
@@ -52,21 +52,21 @@ export default function ServiceStatus() {
       if (backend) parts.push(`backend: ${backend}`)
       if (url) parts.push(`url: ${url}`)
 
-      nextWarnings.push({
+      collectedWarnings.push({
         key: service,
         message: parts.join(' · '),
         detail: (reason || error).trim() || undefined,
       })
     }
 
-    if (nextWarnings.length === 0 && status && Object.keys(status).length === 0) {
-      nextWarnings.push({
+    if (collectedWarnings.length === 0 && status && Object.keys(status).length === 0) {
+      collectedWarnings.push({
         key: 'status_payload',
         message: 'Service status is empty; MCP may be unreachable or returned a non-JSON status payload.',
       })
     }
 
-    return nextWarnings
+    return collectedWarnings
   }, [status])
 
   const summary = useMemo(() => {

@@ -13,7 +13,7 @@ function rpcPayload(method, params) {
   return {
     jsonrpc: '2.0',
     id:
-      typeof crypto?.randomUUID === 'function'
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `${method}-${Date.now()}-${fallbackRpcCounter++}`,
     method,
