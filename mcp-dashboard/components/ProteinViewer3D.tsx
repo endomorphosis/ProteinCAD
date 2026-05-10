@@ -815,6 +815,12 @@ export default function ProteinViewer3D({
     return Array.from(new Set(nums)).sort((a, b) => a - b)
   }
 
+  const updateNumVariants = (value: number) => {
+    setNumVariants(
+      Number.isFinite(value) && value >= 1 ? Math.min(20, Math.floor(value)) : DEFAULT_NUM_VARIANTS
+    )
+  }
+
   const syncPositionsFromSelection = (selection: ResidueSelection[]) => {
     const positions = Array.from(new Set(selection.map((residue) => residue.residueNum))).sort((a, b) => a - b)
     setPositionsText(positions.join(','))
@@ -1429,6 +1435,50 @@ export default function ProteinViewer3D({
                     )}
                   </div>
 
+                  {sequence && (
+                    <div className="rounded-2xl border border-cyan-300/15 bg-slate-950/30 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-100">
+                            Quick mutation start
+                          </div>
+                          <div className="mt-1 text-xs text-cyan-100/75">
+                            These controls stay synced with the detailed variant workspace below.
+                          </div>
+                        </div>
+                        <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-cyan-50">
+                          {parsedVariantPositions.length || 0} position{parsedVariantPositions.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
+                        <label className="block text-xs font-medium uppercase tracking-wide text-cyan-100/80">
+                          Positions
+                          <input
+                            aria-label="Quick variant positions"
+                            data-testid="viewer-analysis-positions-input"
+                            value={positionsText}
+                            onChange={(event) => setPositionsText(event.target.value)}
+                            placeholder="e.g. 9,10,28"
+                            className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-cyan-400/50"
+                          />
+                        </label>
+                        <label className="block text-xs font-medium uppercase tracking-wide text-cyan-100/80">
+                          Variants
+                          <input
+                            aria-label="Quick number of variants"
+                            data-testid="viewer-analysis-num-variants"
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={numVariants}
+                            onChange={(event) => updateNumVariants(Number(event.target.value))}
+                            className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-cyan-400/50"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap">
                     <button
                       data-testid="viewer-analysis-details"
@@ -1460,6 +1510,13 @@ export default function ProteinViewer3D({
                     >
                       Copy positions
                     </button>
+                    <button
+                      data-testid="viewer-analysis-copy-residues"
+                      onClick={copySelectedResidues}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Copy residues
+                    </button>
                     {sequence ? (
                       <button
                         data-testid="viewer-analysis-propose"
@@ -1473,15 +1530,7 @@ export default function ProteinViewer3D({
                       >
                         {variantsRunning ? 'Proposing…' : `Propose ${numVariants} variants`}
                       </button>
-                    ) : (
-                      <button
-                        data-testid="viewer-analysis-copy-residues"
-                        onClick={copySelectedResidues}
-                        className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
-                      >
-                        Copy residues
-                      </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1947,14 +1996,7 @@ export default function ProteinViewer3D({
                       min={1}
                       max={20}
                       value={numVariants}
-                      onChange={(event) => {
-                        const value = Number(event.target.value)
-                        setNumVariants(
-                          Number.isFinite(value) && value >= 1
-                            ? Math.min(20, Math.floor(value))
-                            : DEFAULT_NUM_VARIANTS
-                        )
-                      }}
+                      onChange={(event) => updateNumVariants(Number(event.target.value))}
                       className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
                     />
                   </label>
