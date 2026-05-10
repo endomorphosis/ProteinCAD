@@ -192,7 +192,7 @@ test.describe('Results viewer', () => {
     await expect(page.getByText('A:2 GLY ×')).toBeVisible()
     await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('A:2 GLY')
     await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('2')
-    await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText('C')
+    await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText(job.input.sequence[1])
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
