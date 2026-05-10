@@ -123,14 +123,14 @@ The MCP server supports multiple provider types and a configurable routing strat
 
 ### Routing modes
 
-| Mode | Behaviour |
+| Mode | Behavior |
 |------|-----------|
 | `single` | Always use one provider |
 | `fallback` | Try providers in priority order until one succeeds |
 
 This logic lives primarily in:
 - `mcp-server/runtime_config.py` — schema, persistence, env overrides
-- `mcp-server/model_backends.py` — provider implementations and fallback behaviour
+- `mcp-server/model_backends.py` — provider implementations and fallback behavior
 - `mcp-server/gpu_init.py` — GPU detection and initialisation
 
 ---
