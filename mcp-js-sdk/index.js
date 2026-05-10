@@ -10,7 +10,11 @@ function defaultBaseUrl() {
 let FALLBACK_RPC_COUNTER = 0
 
 function fallbackRequestId(method) {
-  return `${method}-${Date.now()}-${FALLBACK_RPC_COUNTER++}-${Math.random().toString(36).slice(2, 8)}`
+  const monotonicSuffix =
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now().toString(36).replace('.', '')
+      : '0'
+  return `${method}-${Date.now()}-${FALLBACK_RPC_COUNTER++}-${monotonicSuffix}`
 }
 
 function rpcPayload(method, params) {
