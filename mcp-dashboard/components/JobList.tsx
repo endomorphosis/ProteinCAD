@@ -158,7 +158,7 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
               key={job.job_id}
               onClick={() => handleJobClick(job)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
+                if (event.key === 'Enter') {
                   event.preventDefault()
                   handleJobClick(job)
                 }

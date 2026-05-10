@@ -78,6 +78,8 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
   coil: 0x94a3b8,
 }
 
+const DEFAULT_NUM_VARIANTS = 5
+
 function residueKey(chain: string, residueNum: number) {
   return `${chain || '_'}:${residueNum}`
 }
@@ -179,7 +181,7 @@ function detectSecondaryStructure(residues: ResidueSummary[]): Segment[] {
 
   const labels = new Array<SecondaryType>(caResidues.length).fill('coil')
 
-  for (let index = 1; index < caResidues.length - 2; index += 1) {
+  for (let index = 1; index < caResidues.length - 3; index += 1) {
     const prev = caResidues[index - 1].caAtom!
     const current = caResidues[index].caAtom!
     const next = caResidues[index + 1].caAtom!
@@ -529,7 +531,7 @@ export default function ProteinViewer3D({
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [selectedResidues, setSelectedResidues] = useState<ResidueSelection[]>([])
   const [positionsText, setPositionsText] = useState('')
-  const [numVariants, setNumVariants] = useState(5)
+  const [numVariants, setNumVariants] = useState(DEFAULT_NUM_VARIANTS)
   const [variantsResult, setVariantsResult] = useState<any>(null)
   const [variantsError, setVariantsError] = useState<string | null>(null)
   const [variantsRunning, setVariantsRunning] = useState(false)
@@ -1077,7 +1079,11 @@ export default function ProteinViewer3D({
                       value={numVariants}
                       onChange={(event) => {
                         const value = Number(event.target.value)
-                        setNumVariants(Number.isFinite(value) && value >= 1 ? Math.min(20, Math.floor(value)) : 5)
+                        setNumVariants(
+                          Number.isFinite(value) && value >= 1
+                            ? Math.min(20, Math.floor(value))
+                            : DEFAULT_NUM_VARIANTS
+                        )
                       }}
                       className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
                     />

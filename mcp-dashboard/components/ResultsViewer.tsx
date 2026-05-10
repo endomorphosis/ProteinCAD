@@ -229,6 +229,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
             <div className="space-y-3">
               {designs.map((design) => {
                 const isExpanded = expandedDesign === design.design_id
+                const numericBindingScore = Number(design.bindingScore)
                 return (
                   <div
                     key={design.design_id}
@@ -339,8 +340,8 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                                 onClick={() =>
                                   addToDesignLibrary({
                                     sequence: design.sequence,
-                                    score: Number.isFinite(Number(design.bindingScore))
-                                      ? Number(design.bindingScore)
+                                    score: Number.isFinite(numericBindingScore)
+                                      ? numericBindingScore
                                       : undefined,
                                     source: `Design ${design.design_id + 1}`,
                                     pdbData: design.pdbData,
