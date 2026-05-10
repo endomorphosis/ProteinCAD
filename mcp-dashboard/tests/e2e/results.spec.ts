@@ -162,12 +162,13 @@ test.describe('Results viewer', () => {
     await page.getByTestId('propose-variants').click()
 
     await expect(page.getByText(/Proposed variants/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-variant-spotlight')).toBeVisible()
 
     const variantSequenceEl = page.getByTestId('variant-sequence-0')
     await expect(variantSequenceEl).toBeVisible()
     const variantSequence = (await variantSequenceEl.innerText()).trim()
-    await page.getByTestId('save-variant-0').evaluate((el: HTMLElement) => el.click())
-    await page.getByTestId('iterate-variant-0').evaluate((el: HTMLElement) => el.click())
+    await expect(page.getByTestId('viewer-variant-spotlight-sequence-0')).toHaveText(variantSequence)
+    await page.getByTestId('viewer-variant-spotlight-iterate-0').click()
 
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
     await expect(page.getByLabel(/Target Protein Sequence/i)).toHaveValue(variantSequence)
@@ -190,7 +191,7 @@ test.describe('Results viewer', () => {
     await expect(variantSequenceEl).toBeVisible()
     const variantSequence = (await variantSequenceEl.innerText()).trim()
 
-    await page.getByTestId('save-variant-0').evaluate((el: HTMLElement) => el.click())
+    await page.getByTestId('viewer-variant-spotlight-save-0').click()
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
 
     const library = page.getByTestId('design-library')
@@ -383,6 +384,11 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('variant-num')).toHaveValue('3')
     await page.getByTestId('viewer-analysis-propose').click()
     await expect(page.getByText(/Proposed variants/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-variant-spotlight')).toBeVisible()
+    await expect(page.getByTestId('viewer-variant-spotlight')).toBeInViewport()
+    await expect(page.getByTestId('viewer-variant-results')).not.toBeInViewport()
+    await page.getByTestId('viewer-variant-spotlight-open-results').click()
+    await expect(page.getByTestId('viewer-variant-results')).toBeInViewport()
 
     await page.getByTestId('viewer-workflow-jump-variants').click()
     await expect(page.getByText(/Jumped to the variant proposal workspace/i)).toBeVisible()

@@ -71,6 +71,12 @@ type BuildResult = {
   residueCenters: Map<string, THREE.Vector3>
 }
 
+type ProposedVariant = {
+  sequence?: string
+  score?: number
+  positions?: number[]
+}
+
 interface ProteinViewer3DProps {
   pdbData: string
   onClose: () => void
@@ -601,6 +607,7 @@ export default function ProteinViewer3D({
   const workflowSummaryRef = useRef<HTMLElement | null>(null)
   const selectedResiduesRef = useRef<HTMLElement | null>(null)
   const variantSectionRef = useRef<HTMLElement | null>(null)
+  const variantResultsRef = useRef<HTMLElement | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
@@ -730,6 +737,11 @@ export default function ProteinViewer3D({
       latestResidue: selectionAnalytics.labels[selectionAnalytics.labels.length - 1],
     }
   }, [parsedVariantPositions, selectionAnalytics])
+
+  const proposedVariants = useMemo<ProposedVariant[]>(
+    () => (Array.isArray(variantsResult?.variants) ? variantsResult.variants : []),
+    [variantsResult]
+  )
 
   const visibleResidues = useMemo(
     () =>
@@ -916,6 +928,34 @@ export default function ProteinViewer3D({
 
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     setAnalysisMessage('Jumped to the detailed analysis workspace.')
+  }
+
+  const scrollToVariantResults = () => {
+    if (!variantResultsRef.current) {
+      setAnalysisMessage('Proposed variants are not available yet.')
+      return
+    }
+
+    variantResultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setAnalysisMessage('Jumped to the proposed variants list.')
+  }
+
+  const iterateWithVariant = (variant: ProposedVariant) => {
+    if (typeof variant.sequence !== 'string' || !onUseSequence) return
+    onUseSequence(variant.sequence)
+    onClose()
+  }
+
+  const saveVariantToLibrary = (variant: ProposedVariant) => {
+    if (typeof variant.sequence !== 'string') return
+    addToDesignLibrary({
+      sequence: variant.sequence,
+      score: typeof variant.score === 'number' ? variant.score : undefined,
+      positions: Array.isArray(variant.positions) ? variant.positions : undefined,
+      source: title || '3D Viewer Variant',
+      pdbData,
+    })
+    setAnalysisMessage('Saved proposed variant to the Design Library.')
   }
 
   const frameCurrentMolecule = (box: THREE.Box3) => {
@@ -1538,6 +1578,88 @@ export default function ProteinViewer3D({
               </div>
             )}
 
+            {proposedVariants.length > 0 && (
+              <div
+                data-testid="viewer-variant-spotlight"
+                className="border-b border-violet-400/10 bg-violet-500/10 px-4 py-3"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-100">
+                        Variant spotlight
+                      </div>
+                      <div className="mt-1 text-xs text-violet-100/80">
+                        Keep the top proposal actionable next to the 3D viewer.
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-full border border-white/10 bg-slate-950/40 px-2.5 py-1 text-[11px] font-medium text-violet-50">
+                        {proposedVariants.length} result{proposedVariants.length === 1 ? '' : 's'}
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="viewer-variant-spotlight-open-results"
+                        onClick={scrollToVariantResults}
+                        className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-violet-50 transition hover:bg-white/15"
+                      >
+                        Open full list
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2 xl:grid-cols-2">
+                    {proposedVariants.slice(0, 2).map((variant, index) => (
+                      <div
+                        key={`spotlight-${variant.sequence || index}`}
+                        data-testid={`viewer-variant-spotlight-card-${index}`}
+                        className="rounded-2xl border border-white/10 bg-slate-950/55 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-violet-100/70">
+                            Candidate {index + 1}
+                          </div>
+                          <div
+                            data-testid={`viewer-variant-spotlight-score-${index}`}
+                            className="text-sm font-semibold text-violet-50"
+                          >
+                            {typeof variant.score === 'number' ? variant.score : 'n/a'}
+                          </div>
+                        </div>
+                        <div
+                          data-testid={`viewer-variant-spotlight-sequence-${index}`}
+                          className="mt-2 break-all font-mono text-xs text-slate-100"
+                        >
+                          {String(variant.sequence ?? '')}
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {typeof variant.sequence === 'string' && onUseSequence && (
+                            <button
+                              type="button"
+                              data-testid={`viewer-variant-spotlight-iterate-${index}`}
+                              onClick={() => iterateWithVariant(variant)}
+                              className="rounded-xl bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+                            >
+                              Iterate
+                            </button>
+                          )}
+                          {typeof variant.sequence === 'string' && (
+                            <button
+                              type="button"
+                              data-testid={`viewer-variant-spotlight-save-${index}`}
+                              onClick={() => saveVariantToLibrary(variant)}
+                              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
+                            >
+                              Save
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="h-[340px] bg-slate-950/60 sm:h-[420px] lg:min-h-0 lg:flex-1">
               {error ? (
                 <div className="flex h-full items-center justify-center px-6 text-center">
@@ -2021,13 +2143,17 @@ export default function ProteinViewer3D({
               </section>
             )}
 
-            {(variantsError || variantsResult?.variants?.length) && (
-              <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+            {(variantsError || proposedVariants.length) && (
+              <section
+                ref={variantResultsRef}
+                data-testid="viewer-variant-results"
+                className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4"
+              >
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Proposed variants</h4>
                 {variantsError && <p className="mt-3 text-sm text-rose-300">{variantsError}</p>}
-                {variantsResult?.variants?.length ? (
+                {proposedVariants.length ? (
                   <div className="mt-3 max-h-[26rem] space-y-3 overflow-y-auto pr-1">
-                    {variantsResult.variants.slice(0, 6).map((variant: any, index: number) => (
+                    {proposedVariants.slice(0, 6).map((variant, index) => (
                       <div
                         key={`${variant?.sequence || index}`}
                         className="rounded-2xl border border-white/10 bg-slate-950/70 p-3"
@@ -2048,10 +2174,7 @@ export default function ProteinViewer3D({
                           {typeof variant?.sequence === 'string' && onUseSequence && (
                             <button
                               data-testid={`iterate-variant-${index}`}
-                              onClick={() => {
-                                onUseSequence(variant.sequence)
-                                onClose()
-                              }}
+                              onClick={() => iterateWithVariant(variant)}
                               className="rounded-xl bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
                             >
                               Iterate with this
@@ -2060,15 +2183,7 @@ export default function ProteinViewer3D({
                           {typeof variant?.sequence === 'string' && (
                             <button
                               data-testid={`save-variant-${index}`}
-                              onClick={() => {
-                                addToDesignLibrary({
-                                  sequence: variant.sequence,
-                                  score: typeof variant?.score === 'number' ? variant.score : undefined,
-                                  positions: Array.isArray(variant?.positions) ? variant.positions : undefined,
-                                  source: title || '3D Viewer Variant',
-                                  pdbData,
-                                })
-                              }}
+                              onClick={() => saveVariantToLibrary(variant)}
                               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                             >
                               Save to Library
