@@ -598,6 +598,7 @@ export default function ProteinViewer3D({
   const residueCentersRef = useRef<Map<string, THREE.Vector3>>(new Map())
   const analysisRibbonRef = useRef<HTMLDivElement | null>(null)
   const workflowSummaryRef = useRef<HTMLElement | null>(null)
+  const selectedResiduesRef = useRef<HTMLElement | null>(null)
   const variantSectionRef = useRef<HTMLElement | null>(null)
 
   const [error, setError] = useState<string | null>(null)
@@ -897,6 +898,17 @@ export default function ProteinViewer3D({
 
     variantSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
     setAnalysisMessage('Jumped to the variant proposal workspace.')
+  }
+
+  const scrollToDetailedAnalysis = () => {
+    const target = workflowSummaryRef.current || selectedResiduesRef.current || variantSectionRef.current
+    if (!target) {
+      setAnalysisMessage('Detailed analysis panels are not available for this structure.')
+      return
+    }
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setAnalysisMessage('Jumped to the detailed analysis workspace.')
   }
 
   const frameCurrentMolecule = (box: THREE.Box3) => {
@@ -1376,7 +1388,7 @@ export default function ProteinViewer3D({
                 data-testid="viewer-analysis-ribbon"
                 className="border-b border-cyan-400/10 bg-cyan-400/10 px-4 py-3"
               >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-cyan-300/20 bg-slate-950/30 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-cyan-50">
@@ -1397,7 +1409,43 @@ export default function ProteinViewer3D({
                       </span>
                     </div>
                   </div>
+
                   <div className="flex flex-wrap gap-2">
+                    {selectedResidues.slice(-4).map((selection) => (
+                      <button
+                        key={`analysis-${selection.chain}-${selection.residueNum}`}
+                        type="button"
+                        data-testid={`viewer-analysis-chip-${selection.chain}-${selection.residueNum}`}
+                        onClick={() => focusSelectionEntry(selection)}
+                        className="rounded-full border border-cyan-300/25 bg-slate-950/35 px-2.5 py-1.5 text-xs font-medium text-cyan-50 transition hover:bg-slate-950/55"
+                      >
+                        {formatResidueSelection(selection)}
+                      </button>
+                    ))}
+                    {selectedResidues.length > 4 && (
+                      <span className="rounded-full border border-white/10 bg-slate-950/25 px-2.5 py-1.5 text-xs text-cyan-100/80">
+                        +{selectedResidues.length - 4} more
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap">
+                    <button
+                      data-testid="viewer-analysis-details"
+                      onClick={scrollToDetailedAnalysis}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Open details
+                    </button>
+                    {sequence && (
+                      <button
+                        data-testid="viewer-analysis-jump-variants"
+                        onClick={scrollToVariantProposal}
+                        className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                      >
+                        Jump to variants
+                      </button>
+                    )}
                     <button
                       data-testid="viewer-analysis-center"
                       onClick={focusSelection}
@@ -1605,7 +1653,11 @@ export default function ProteinViewer3D({
               </section>
             )}
 
-            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <section
+              ref={selectedResiduesRef}
+              data-testid="viewer-selected-residues"
+              className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4"
+            >
               <div className="flex items-center justify-between gap-3">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Chain overview</h4>
                 <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300">
@@ -1868,7 +1920,11 @@ export default function ProteinViewer3D({
             </section>
 
             {sequence && (
-              <section ref={variantSectionRef} className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <section
+                ref={variantSectionRef}
+                data-testid="viewer-variant-proposal"
+                className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4"
+              >
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Variant proposal</h4>
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm text-slate-300">
