@@ -23,19 +23,21 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const prefillSequence = prefill?.sequence
+  const prefillNumDesigns = prefill?.num_designs
 
   useEffect(() => {
     if (!prefill) return
 
     setFormData((prev) => ({
       ...prev,
-      sequence: typeof prefill.sequence === 'string' ? prefill.sequence : prev.sequence,
+      sequence: typeof prefillSequence === 'string' ? prefillSequence : prev.sequence,
       num_designs:
-        typeof prefill.num_designs === 'number' && Number.isFinite(prefill.num_designs)
-          ? prefill.num_designs
+        typeof prefillNumDesigns === 'number' && Number.isFinite(prefillNumDesigns)
+          ? prefillNumDesigns
           : prev.num_designs,
     }))
-  }, [prefill?.sequence, prefill?.num_designs])
+  }, [prefill, prefillNumDesigns, prefillSequence])
 
   const sequenceStats = useMemo(() => {
     const normalized = formData.sequence.replace(/\s+/g, '')

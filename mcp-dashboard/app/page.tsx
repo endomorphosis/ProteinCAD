@@ -133,9 +133,11 @@ export default function Home() {
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-semibold text-white">MCP Tools</h2>
-                <p className="mt-1 text-sm text-slate-400">Inspect tool schemas and run focused operations.</p>
+                  <p className="mt-1 text-sm text-slate-400">Inspect tool schemas and run focused operations.</p>
                 </div>
-                <span className="rounded-full bg-violet-400/10 px-3 py-1 text-xs font-medium text-violet-100">Protocol-aware</span>
+                <span className="rounded-full bg-violet-400/10 px-3 py-1 text-xs font-medium text-violet-100">
+                  Protocol-aware
+                </span>
               </div>
               <ToolsPanel />
             </section>
@@ -144,20 +146,8 @@ export default function Home() {
               <h2 className="text-2xl font-semibold text-white">Notebook Access</h2>
               <p className="mt-1 text-sm text-slate-400">Open exploratory notebooks next to the dashboard workflow.</p>
               <div className="mt-4">
-                <JupyterLauncher />
+                <JupyterLauncher tips={quickTips} />
               </div>
-            </section>
-
-            <section className="rounded-3xl border border-cyan-400/20 bg-cyan-400/5 p-6 shadow-lg shadow-cyan-950/10">
-              <h2 className="text-lg font-semibold text-white">Analysis tips</h2>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-                {quickTips.map((tip) => (
-                  <li key={tip} className="flex gap-3">
-                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-300" />
-                    <span>{tip}</span>
-                  </li>
-                ))}
-              </ul>
             </section>
           </div>
 

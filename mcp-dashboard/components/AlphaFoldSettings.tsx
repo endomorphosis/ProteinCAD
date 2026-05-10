@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { extractFirstTextContent } from '@generative-protein/mcp-js-sdk'
 
 interface AlphaFoldSettings {
@@ -27,7 +27,7 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
   const [success, setSuccess] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
-  const callTool = async (name: string, args: Record<string, any>) => {
+  const callTool = useCallback(async (name: string, args: Record<string, any>) => {
     const response = await fetch('/api/mcp/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -37,9 +37,9 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
       throw new Error(`Tool call failed (${response.status})`)
     }
     return response.json()
-  }
+  }, [])
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -53,11 +53,11 @@ export default function AlphaFoldSettings({ onSettingsChanged }: Props) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [callTool])
 
   useEffect(() => {
     fetchSettings()
-  }, [])
+  }, [fetchSettings])
 
   const handleSettingChange = (key: keyof AlphaFoldSettings, value: any) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
