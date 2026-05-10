@@ -80,7 +80,7 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
-// tan(30°) ≈ 0.577, which matches the half-angle tangent for a 60° fallback camera field-of-view.
+// tan(30°) ≈ 0.577, the half-angle tangent for a 60° fallback camera field-of-view.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
 
@@ -889,11 +889,11 @@ export default function ProteinViewer3D({
       cameraRef.current = camera
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
-      renderer.setSize(width, height)
-      renderer.outputColorSpace = THREE.SRGBColorSpace
-      container.appendChild(renderer.domElement)
-      rendererRef.current = renderer
+       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+       renderer.setSize(width, height)
+       renderer.outputColorSpace = THREE.SRGBColorSpace
+       container.appendChild(renderer.domElement)
+       rendererRef.current = renderer
 
        const controls = new OrbitControls(camera, renderer.domElement)
        controls.enableDamping = true
