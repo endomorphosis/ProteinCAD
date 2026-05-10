@@ -48,6 +48,13 @@ type Segment = {
 }
 
 type ResidueSelection = { chain: string; residueNum: number; residue: string }
+type ChainSummary = {
+  chain: string
+  residueCount: number
+  selectedCount: number
+  averageBFactor: number
+  residueRange: string
+}
 
 type BuildResult = {
   group: THREE.Group
@@ -537,6 +544,33 @@ function formatResidueRanges(values: number[]) {
   return ranges.join(', ')
 }
 
+async function copyTextToClipboard(text: string) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through to document.execCommand fallback
+  }
+
+  try {
+    if (typeof document === 'undefined') return false
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'absolute'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
 export default function ProteinViewer3D({
   pdbData,
   onClose,
@@ -631,10 +665,32 @@ export default function ProteinViewer3D({
     [parsed.residues, selectedChain]
   )
 
+  const chainSummaries = useMemo<ChainSummary[]>(
+    () =>
+      parsed.chains.map((chain) => {
+        const chainResidues = parsed.residues.filter((residue) => residue.chain === chain)
+        return {
+          chain,
+          residueCount: chainResidues.length,
+          selectedCount: selectedResidues.filter((residue) => residue.chain === chain).length,
+          averageBFactor:
+            chainResidues.reduce((sum, residue) => sum + residue.avgBFactor, 0) /
+            Math.max(chainResidues.length, 1),
+          residueRange: formatResidueRanges(chainResidues.map((residue) => residue.residueNum)),
+        }
+      }),
+    [parsed.chains, parsed.residues, selectedResidues]
+  )
+
   useEffect(() => {
-    setSelectedResidues((prev) =>
-      prev.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain)
-    )
+    setSelectedResidues((prev) => {
+      const next = prev.filter((residue) => selectedChain === 'all' || residue.chain === selectedChain)
+      if (next.length !== prev.length) {
+        const positions = Array.from(new Set(next.map((residue) => residue.residueNum))).sort((a, b) => a - b)
+        setPositionsText(positions.join(','))
+      }
+      return next
+    })
   }, [selectedChain])
 
   useEffect(() => {
@@ -664,6 +720,57 @@ export default function ProteinViewer3D({
   const syncPositionsFromSelection = (selection: ResidueSelection[]) => {
     const positions = Array.from(new Set(selection.map((residue) => residue.residueNum))).sort((a, b) => a - b)
     setPositionsText(positions.join(','))
+  }
+
+  const applySelection = (selection: ResidueSelection[], message?: string) => {
+    setSelectedResidues(selection)
+    syncPositionsFromSelection(selection)
+    if (message) {
+      setAnalysisMessage(message)
+    }
+  }
+
+  const selectHotspots = (limit: number, chainOverride?: string) => {
+    const effectiveChain = chainOverride || selectedChain
+    const residues = parsed.residues
+      .filter((residue) => effectiveChain === 'all' || residue.chain === effectiveChain)
+      .sort((left, right) => right.avgBFactor - left.avgBFactor || left.residueNum - right.residueNum)
+      .slice(0, limit)
+      .map((residue) => ({
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+      }))
+
+    if (residues.length === 0) {
+      setAnalysisMessage('No residues are available for hotspot analysis.')
+      return
+    }
+
+    if (chainOverride && selectedChain !== chainOverride) {
+      setSelectedChain(chainOverride)
+    }
+
+    applySelection(
+      residues,
+      `Selected ${residues.length} high B-factor hotspot${residues.length === 1 ? '' : 's'}${
+        chainOverride ? ` in chain ${chainOverride}` : ''
+      }.`
+    )
+  }
+
+  const copySelectedPositions = async () => {
+    if (!positionsText.trim()) {
+      setAnalysisMessage('Select residues before copying variant positions.')
+      return
+    }
+
+    const copied = await copyTextToClipboard(positionsText)
+    setAnalysisMessage(
+      copied
+        ? `Copied variant positions ${positionsText}.`
+        : `Variant positions ready to copy: ${positionsText}.`
+    )
   }
 
   const frameCurrentMolecule = (box: THREE.Box3) => {
@@ -1000,8 +1107,7 @@ export default function ProteinViewer3D({
   }, [onClose, parsed, renderMode, selectedChain, selectedResidues, showHeatmap])
 
   const clearSelection = () => {
-    setSelectedResidues([])
-    setPositionsText('')
+    applySelection([], 'Cleared the current residue selection.')
   }
 
   const residueStats = {
@@ -1179,7 +1285,85 @@ export default function ProteinViewer3D({
                   </div>
                 </label>
 
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    data-testid="viewer-hotspots-3"
+                    onClick={() => selectHotspots(3)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Top 3 hotspots
+                  </button>
+                  <button
+                    data-testid="viewer-copy-positions"
+                    onClick={copySelectedPositions}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Copy positions
+                  </button>
+                </div>
+
                 {analysisMessage && <p className="text-xs text-cyan-200">{analysisMessage}</p>}
+              </div>
+            </section>
+
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Chain overview</h4>
+                <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                  {chainSummaries.length} chain{chainSummaries.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="mt-4 space-y-3">
+                {chainSummaries.map((summary) => {
+                  const active = selectedChain === summary.chain
+                  return (
+                    <div
+                      key={summary.chain}
+                      data-testid={`viewer-chain-card-${summary.chain}`}
+                      className={`rounded-2xl border p-3 ${
+                        active
+                          ? 'border-cyan-400/30 bg-cyan-400/10'
+                          : 'border-white/10 bg-slate-950/60'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">Chain {summary.chain}</div>
+                          <div className="mt-1 text-xs text-slate-400">
+                            Residues {summary.residueRange} · {summary.residueCount} total
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-medium text-slate-200">
+                          {summary.selectedCount} selected
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <InspectorStat label="Avg B-factor" value={summary.averageBFactor.toFixed(1)} />
+                        <InspectorStat label="Residues" value={String(summary.residueCount)} />
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <button
+                          data-testid={`viewer-chain-solo-${summary.chain}`}
+                          onClick={() => setSelectedChain((prev) => (prev === summary.chain ? 'all' : summary.chain))}
+                          className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                            active
+                              ? 'bg-cyan-400 text-slate-950'
+                              : 'bg-white/5 text-slate-200 hover:bg-white/10'
+                          }`}
+                        >
+                          {active ? 'Show all chains' : `Only chain ${summary.chain}`}
+                        </button>
+                        <button
+                          data-testid={`viewer-chain-hotspots-${summary.chain}`}
+                          onClick={() => selectHotspots(3, summary.chain)}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                        >
+                          Chain hotspots
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </section>
 

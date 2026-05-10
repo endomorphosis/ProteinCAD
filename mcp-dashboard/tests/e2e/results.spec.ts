@@ -1,6 +1,18 @@
 import { test, expect, type Page } from '@playwright/test'
 import { examplePdb, installMockEventSource, jsonRoute } from './helpers/mocks'
 
+const analysisPdb = `ATOM      1  N   ALA A   1      10.000  12.000   2.100  1.00 12.00           N
+ATOM      2  CA  ALA A   1      11.400  12.400   2.100  1.00 12.00           C
+ATOM      3  N   GLY A   2      12.700  13.200   2.100  1.00 18.00           N
+ATOM      4  CA  GLY A   2      13.900  14.000   2.100  1.00 18.00           C
+ATOM      5  N   SER B   9      17.500  16.200   2.100  1.00 65.00           N
+ATOM      6  CA  SER B   9      18.900  16.700   2.100  1.00 65.00           C
+ATOM      7  N   TYR B  10      20.300  17.500   2.100  1.00 72.00           N
+ATOM      8  CA  TYR B  10      21.700  18.100   2.100  1.00 72.00           C
+TER
+END
+`
+
 function makeCompletedJob() {
   return {
     job_id: 'job_completed_0',
@@ -30,6 +42,24 @@ function makeCompletedJob() {
   }
 }
 
+function makeAnalysisJob() {
+  return {
+    ...makeCompletedJob(),
+    input: { sequence: 'ACDEFGHIKLMNPQRSTVWY', num_designs: 5 },
+    results: {
+      target_structure: { pdb: analysisPdb },
+      designs: [
+        {
+          design_id: 0,
+          backbone: { pdb: analysisPdb },
+          sequence: { sequence: 'ACDEFGHIKLMNPQRSTVWY' },
+          complex_structure: { pdb: analysisPdb },
+        },
+      ],
+    },
+  }
+}
+
 async function installCompletedJobRoutes(page: Page, job: ReturnType<typeof makeCompletedJob>) {
   await page.route('**/api/mcp/services/status', async (route) => {
     await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
@@ -51,6 +81,20 @@ async function openCompletedJob(page: Page) {
 test.describe('Results viewer', () => {
   test.beforeEach(async ({ page }) => {
     await installMockEventSource(page)
+    await page.addInitScript(() => {
+      let copiedText = ''
+      Object.defineProperty(window, '__copiedText', {
+        get: () => copiedText,
+      })
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text: string) => {
+            copiedText = text
+          },
+        },
+        configurable: true,
+      })
+    })
   })
 
   test('shows completed results + allows download', async ({ page }) => {
@@ -206,5 +250,31 @@ test.describe('Results viewer', () => {
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
+  })
+
+  test('3D viewer surfaces chain summaries and hotspot analysis actions', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    await expect(page.getByTestId('viewer-chain-card-A')).toBeVisible()
+    await expect(page.getByTestId('viewer-chain-card-B')).toBeVisible()
+
+    await page.getByTestId('viewer-chain-hotspots-B').click()
+    await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('B')
+    await expect(page.getByTestId('variant-positions')).toHaveValue('9,10')
+    await expect(page.getByText(/Selected 2 high B-factor hotspots in chain B/i)).toBeVisible()
+
+    await page.getByTestId('viewer-copy-positions').click()
+    await expect(page.getByText(/Copied variant positions 9,10/i)).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('9,10')
+
+    await page.getByTestId('viewer-chain-solo-B').click()
+    await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('all')
   })
 })
