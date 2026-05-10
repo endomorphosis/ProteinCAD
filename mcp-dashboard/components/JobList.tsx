@@ -162,6 +162,10 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
                   event.preventDefault()
                   handleJobClick(job)
                 }
+                if (event.key === 'Escape' && selectedJobId === job.job_id) {
+                  event.preventDefault()
+                  setSelectedJobId(null)
+                }
               }}
               role="button"
               tabIndex={0}

@@ -9,13 +9,17 @@ function defaultBaseUrl() {
 
 let FALLBACK_RPC_COUNTER = 0
 
+function fallbackRequestId(method) {
+  return `${method}-${Date.now()}-${FALLBACK_RPC_COUNTER++}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function rpcPayload(method, params) {
   return {
     jsonrpc: '2.0',
     id:
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
-        : `${method}-${Date.now()}-${FALLBACK_RPC_COUNTER++}`,
+        : fallbackRequestId(method),
     method,
     params,
   }
