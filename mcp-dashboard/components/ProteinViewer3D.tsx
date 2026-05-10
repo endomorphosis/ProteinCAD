@@ -596,6 +596,8 @@ export default function ProteinViewer3D({
   const frameRef = useRef<number | null>(null)
   const moleculeRef = useRef<THREE.Group | null>(null)
   const residueCentersRef = useRef<Map<string, THREE.Vector3>>(new Map())
+  const workflowSummaryRef = useRef<HTMLElement | null>(null)
+  const variantSectionRef = useRef<HTMLElement | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
@@ -704,6 +706,27 @@ export default function ProteinViewer3D({
       farthestPair,
     }
   }, [selectedResidueDetails])
+
+  const parsedVariantPositions = useMemo(() => {
+    const nums = positionsText
+      .split(/[^0-9]+/g)
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .map((token) => Number(token))
+      .filter((value) => Number.isFinite(value) && value > 0)
+    return Array.from(new Set(nums)).sort((a, b) => a - b)
+  }, [positionsText])
+
+  const workflowSummary = useMemo(() => {
+    if (!selectionAnalytics) return null
+
+    return {
+      residueCount: selectionAnalytics.labels.length,
+      chains: selectionAnalytics.chains.join(', '),
+      positionsLabel: parsedVariantPositions.length > 0 ? parsedVariantPositions.join(', ') : 'None',
+      latestResidue: selectionAnalytics.labels[selectionAnalytics.labels.length - 1],
+    }
+  }, [parsedVariantPositions, selectionAnalytics])
 
   const visibleResidues = useMemo(
     () =>
@@ -830,6 +853,10 @@ export default function ProteinViewer3D({
         chainOverride ? ` in chain ${chainOverride}` : ''
       }.`
     )
+
+    window.setTimeout(() => {
+      workflowSummaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
   }
 
   const copySelectedPositions = async () => {
@@ -855,6 +882,16 @@ export default function ProteinViewer3D({
     const text = selectionAnalytics.labels.join(', ')
     const copied = await copyTextToClipboard(text)
     setAnalysisMessage(copied ? `Copied selected residues ${text}.` : `Selected residues ready to copy: ${text}.`)
+  }
+
+  const scrollToVariantProposal = () => {
+    if (!variantSectionRef.current) {
+      setAnalysisMessage('Variant proposal controls are not available for this structure.')
+      return
+    }
+
+    variantSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setAnalysisMessage('Jumped to the variant proposal workspace.')
   }
 
   const frameCurrentMolecule = (box: THREE.Box3) => {
@@ -1406,6 +1443,89 @@ export default function ProteinViewer3D({
               </div>
             </section>
 
+            {workflowSummary && (
+              <section
+                ref={workflowSummaryRef}
+                data-testid="viewer-workflow-summary"
+                className="mt-4 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold uppercase tracking-wide text-cyan-50">Mutation workspace</h4>
+                    <p className="mt-1 text-xs text-cyan-100/80">
+                      Keep the active residue set close to the variant workflow without losing structural context.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-cyan-300/20 bg-slate-950/30 px-2.5 py-1 text-[11px] font-medium text-cyan-50">
+                    {workflowSummary.residueCount} selected
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <InspectorStat
+                    label="Variant positions"
+                    value={workflowSummary.positionsLabel}
+                    testId="viewer-workflow-positions"
+                  />
+                  <InspectorStat
+                    label="Chains in play"
+                    value={workflowSummary.chains}
+                    testId="viewer-workflow-chains"
+                  />
+                </div>
+                <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/50 px-3 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Latest residue</div>
+                  <div data-testid="viewer-workflow-latest" className="mt-2 text-sm font-medium text-slate-100">
+                    {workflowSummary.latestResidue}
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button
+                    data-testid="viewer-workflow-copy-positions"
+                    onClick={copySelectedPositions}
+                    className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                  >
+                    Copy positions
+                  </button>
+                  <button
+                    data-testid="viewer-workflow-jump-variants"
+                    onClick={scrollToVariantProposal}
+                    className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                  >
+                    Jump to variants
+                  </button>
+                  <button
+                    data-testid="viewer-workflow-center"
+                    onClick={focusSelection}
+                    className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                  >
+                    Center selection
+                  </button>
+                  {sequence ? (
+                    <button
+                      data-testid="viewer-workflow-propose"
+                      onClick={callProposeVariants}
+                      disabled={variantsRunning}
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                        variantsRunning
+                          ? 'bg-slate-700 text-slate-300'
+                          : 'bg-violet-500 text-white hover:bg-violet-400'
+                      }`}
+                    >
+                      {variantsRunning ? 'Proposing…' : `Propose ${numVariants} variants`}
+                    </button>
+                  ) : (
+                    <button
+                      data-testid="viewer-workflow-copy-residues"
+                      onClick={copySelectedResidues}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Copy residues
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-center justify-between gap-3">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Chain overview</h4>
@@ -1596,7 +1716,8 @@ export default function ProteinViewer3D({
                     {sequenceMapEntries.length} visible
                   </span>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 max-h-56 overflow-y-auto pr-1">
+                  <div className="flex flex-wrap gap-2">
                   {sequenceMapEntries.map((entry) => {
                     const label = `${entry.chain}:${entry.residueNum}`
                     const value = entry.sequenceResidue || entry.residue[0] || '?'
@@ -1626,6 +1747,7 @@ export default function ProteinViewer3D({
                       </button>
                     )
                   })}
+                  </div>
                 </div>
               </section>
             )}
@@ -1640,7 +1762,8 @@ export default function ProteinViewer3D({
                   Clear
                 </button>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 max-h-40 overflow-y-auto pr-1">
+                <div className="flex flex-wrap gap-2">
                 {selectedResidues.length > 0 ? (
                   selectedResidues.map((selection) => (
                     <button
@@ -1661,11 +1784,12 @@ export default function ProteinViewer3D({
                 ) : (
                   <p className="text-sm text-slate-400">Click atoms or residue markers in the viewer to build a selection.</p>
                 )}
+                </div>
               </div>
             </section>
 
             {sequence && (
-              <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <section ref={variantSectionRef} className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Variant proposal</h4>
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm text-slate-300">
@@ -1723,7 +1847,7 @@ export default function ProteinViewer3D({
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Proposed variants</h4>
                 {variantsError && <p className="mt-3 text-sm text-rose-300">{variantsError}</p>}
                 {variantsResult?.variants?.length ? (
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-3 max-h-[26rem] space-y-3 overflow-y-auto pr-1">
                     {variantsResult.variants.slice(0, 6).map((variant: any, index: number) => (
                       <div
                         key={`${variant?.sequence || index}`}

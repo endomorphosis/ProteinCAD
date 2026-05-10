@@ -314,6 +314,14 @@ test.describe('Results viewer', () => {
     await expect(page.getByText(/Copied variant positions 9,10/i)).toBeVisible()
     await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('9,10')
 
+    await expect(page.getByTestId('viewer-workflow-summary')).toBeVisible()
+    await expect(page.getByTestId('viewer-workflow-positions')).toContainText('9')
+    await expect(page.getByTestId('viewer-workflow-positions')).toContainText('10')
+    await expect(page.getByTestId('viewer-workflow-chains')).toHaveText('B')
+    await expect(page.getByTestId('viewer-workflow-latest')).toHaveText(/B:(9 SER|10 TYR)/)
+    await page.getByTestId('viewer-workflow-propose').click()
+    await expect(page.getByText(/Proposed variants/i)).toBeVisible()
+
     await page.getByTestId('viewer-copy-residues').click()
     await expect(page.getByTestId('viewer-selection-chains')).toHaveText('B')
     await expect(page.getByTestId('viewer-selection-pair')).toContainText('B:9 SER')
@@ -340,6 +348,14 @@ test.describe('Results viewer', () => {
     const canvasBox = await page.locator('canvas').boundingBox()
     const sequenceMapBox = await page.getByTestId('viewer-sequence-map').boundingBox()
     expect((sequenceMapBox?.y || 0)).toBeGreaterThanOrEqual((canvasBox?.y || 0) + (canvasBox?.height || 0) - 1)
+
+    await page.getByTestId('viewer-chain-hotspots-B').click()
+    const workflowBox = await page.getByTestId('viewer-workflow-summary').boundingBox()
+    expect((workflowBox?.y || 0)).toBeLessThan((page.viewportSize()?.height || 0))
+
+    await page.getByTestId('viewer-workflow-jump-variants').click()
+    await expect(page.getByText(/Jumped to the variant proposal workspace/i)).toBeVisible()
+    await expect(page.getByTestId('variant-positions')).toBeInViewport()
 
     await page.getByTestId('viewer-sequence-token-B-10').click()
     await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('B:10 TYR')
