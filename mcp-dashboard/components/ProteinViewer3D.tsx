@@ -596,6 +596,7 @@ export default function ProteinViewer3D({
   const frameRef = useRef<number | null>(null)
   const moleculeRef = useRef<THREE.Group | null>(null)
   const residueCentersRef = useRef<Map<string, THREE.Vector3>>(new Map())
+  const analysisRibbonRef = useRef<HTMLDivElement | null>(null)
   const workflowSummaryRef = useRef<HTMLElement | null>(null)
   const variantSectionRef = useRef<HTMLElement | null>(null)
 
@@ -855,7 +856,11 @@ export default function ProteinViewer3D({
     )
 
     window.setTimeout(() => {
-      workflowSummaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const scrollTarget =
+        typeof window !== 'undefined' && window.innerWidth < 1024
+          ? analysisRibbonRef.current || workflowSummaryRef.current
+          : workflowSummaryRef.current || analysisRibbonRef.current
+      scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 0)
   }
 
@@ -1280,7 +1285,10 @@ export default function ProteinViewer3D({
 
         <div className="flex flex-1 flex-col overflow-y-auto lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 border-b border-white/10 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r">
-            <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
+            <div
+              data-testid="viewer-controls-toolbar"
+              className="flex items-center gap-2 overflow-x-auto border-b border-white/10 px-4 py-3 pb-4"
+            >
               {([
                 ['ribbon', 'Ribbon'],
                 ['cartoon', 'Cartoon'],
@@ -1290,7 +1298,7 @@ export default function ProteinViewer3D({
                 <button
                   key={mode}
                   onClick={() => setRenderMode(mode)}
-                  className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                  className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
                     renderMode === mode
                       ? 'bg-cyan-400 text-slate-950'
                       : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -1302,7 +1310,7 @@ export default function ProteinViewer3D({
 
               <button
                 onClick={() => setShowHeatmap((prev) => !prev)}
-                className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
                   showHeatmap
                     ? 'bg-amber-400 text-slate-950'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -1314,7 +1322,7 @@ export default function ProteinViewer3D({
 
               <button
                 onClick={resetView}
-                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
               >
                 Reset view
               </button>
@@ -1322,7 +1330,7 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-focus-selection"
                 onClick={focusSelection}
-                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
               >
                 Center selection
               </button>
@@ -1330,7 +1338,7 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-auto-rotate"
                 onClick={() => setAutoRotate((prev) => !prev)}
-                className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
                   autoRotate
                     ? 'bg-emerald-400 text-slate-950'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -1342,12 +1350,14 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-snapshot"
                 onClick={downloadSnapshot}
-                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
               >
                 Save PNG
               </button>
 
-              <div className="ml-auto text-xs text-slate-400">Rotate: drag · Zoom: scroll · Select: click residues</div>
+              <div className="ml-auto hidden shrink-0 text-xs text-slate-400 xl:block">
+                Rotate: drag · Zoom: scroll · Select: click residues
+              </div>
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1359,6 +1369,75 @@ export default function ProteinViewer3D({
                 value={parsed.bFactorRange.average ? parsed.bFactorRange.average.toFixed(1) : '0.0'}
               />
             </div>
+
+            {workflowSummary && (
+              <div
+                ref={analysisRibbonRef}
+                data-testid="viewer-analysis-ribbon"
+                className="border-b border-cyan-400/10 bg-cyan-400/10 px-4 py-3"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-cyan-300/20 bg-slate-950/30 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-cyan-50">
+                        Active analysis
+                      </span>
+                      <span className="text-xs font-medium text-cyan-100">
+                        {workflowSummary.residueCount} selected · Chains {workflowSummary.chains}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-100">
+                      Positions{' '}
+                      <span data-testid="viewer-analysis-positions" className="font-semibold text-white">
+                        {workflowSummary.positionsLabel}
+                      </span>{' '}
+                      · Latest{' '}
+                      <span data-testid="viewer-analysis-latest" className="font-semibold text-white">
+                        {workflowSummary.latestResidue}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      data-testid="viewer-analysis-center"
+                      onClick={focusSelection}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Center selection
+                    </button>
+                    <button
+                      data-testid="viewer-analysis-copy"
+                      onClick={copySelectedPositions}
+                      className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                    >
+                      Copy positions
+                    </button>
+                    {sequence ? (
+                      <button
+                        data-testid="viewer-analysis-propose"
+                        onClick={callProposeVariants}
+                        disabled={variantsRunning}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                          variantsRunning
+                            ? 'bg-slate-700 text-slate-300'
+                            : 'bg-violet-500 text-white hover:bg-violet-400'
+                        }`}
+                      >
+                        {variantsRunning ? 'Proposing…' : `Propose ${numVariants} variants`}
+                      </button>
+                    ) : (
+                      <button
+                        data-testid="viewer-analysis-copy-residues"
+                        onClick={copySelectedResidues}
+                        className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
+                      >
+                        Copy residues
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="h-[340px] bg-slate-950/60 sm:h-[420px] lg:min-h-0 lg:flex-1">
               {error ? (

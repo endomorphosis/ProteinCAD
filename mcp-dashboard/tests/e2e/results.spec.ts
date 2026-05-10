@@ -319,7 +319,12 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-workflow-positions')).toContainText('10')
     await expect(page.getByTestId('viewer-workflow-chains')).toHaveText('B')
     await expect(page.getByTestId('viewer-workflow-latest')).toHaveText(/B:(9 SER|10 TYR)/)
-    await page.getByTestId('viewer-workflow-propose').click()
+    await expect(page.getByTestId('viewer-analysis-ribbon')).toBeVisible()
+    await expect(page.getByTestId('viewer-analysis-positions')).toContainText('9')
+    await expect(page.getByTestId('viewer-analysis-positions')).toContainText('10')
+    await page.getByTestId('viewer-analysis-copy').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('9,10')
+    await page.getByTestId('viewer-analysis-propose').click()
     await expect(page.getByText(/Proposed variants/i)).toBeVisible()
 
     await page.getByTestId('viewer-copy-residues').click()
@@ -350,8 +355,10 @@ test.describe('Results viewer', () => {
     expect((sequenceMapBox?.y || 0)).toBeGreaterThanOrEqual((canvasBox?.y || 0) + (canvasBox?.height || 0) - 1)
 
     await page.getByTestId('viewer-chain-hotspots-B').click()
-    const workflowBox = await page.getByTestId('viewer-workflow-summary').boundingBox()
-    expect((workflowBox?.y || 0)).toBeLessThan((page.viewportSize()?.height || 0))
+    await expect(page.getByTestId('viewer-analysis-ribbon')).toBeVisible()
+    await expect(page.getByTestId('viewer-analysis-ribbon')).toBeInViewport()
+    await page.getByTestId('viewer-analysis-propose').click()
+    await expect(page.getByText(/Proposed variants/i)).toBeVisible()
 
     await page.getByTestId('viewer-workflow-jump-variants').click()
     await expect(page.getByText(/Jumped to the variant proposal workspace/i)).toBeVisible()
@@ -361,5 +368,28 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-inspector-primary')).toHaveText('B:10 TYR')
     await expect(page.getByTestId('variant-positions')).toHaveValue('10')
     await expect(page.getByText(/Focused on residue B:10/i)).toBeVisible()
+  })
+
+  test('3D viewer keeps the top control toolbar on a single row at tablet widths', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+    await page.setViewportSize({ width: 1024, height: 1400 })
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    const buttonTops = await Promise.all(
+      ['Ribbon', 'Cartoon', 'Ball & Stick', 'Stick', 'B-factor heatmap', 'Reset view', 'Center selection', 'Auto-rotate off', 'Save PNG'].map(
+        async (name) => {
+          const box = await page.getByRole('button', { name, exact: true }).boundingBox()
+          return Math.round(box?.y || 0)
+        }
+      )
+    )
+
+    expect(new Set(buttonTops).size).toBe(1)
   })
 })
