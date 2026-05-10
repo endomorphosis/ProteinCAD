@@ -23,6 +23,13 @@ type DiffEntry = {
   to: string
 }
 
+type StructureSummary = {
+  atoms: number
+  residues: number
+  chains: string[]
+  caResidues: number
+}
+
 function extractSequence(data: any): string {
   if (typeof data === 'string') return data
   if (data?.sequence) return data.sequence
@@ -53,6 +60,64 @@ function formatPdbPreview(pdbData: string) {
   return pdbData.split('\n').slice(0, 8).join('\n')
 }
 
+function summarizePdb(pdbData: string): StructureSummary {
+  const chainSet = new Set<string>()
+  const residueSet = new Set<string>()
+  const caResidueSet = new Set<string>()
+  let atoms = 0
+
+  for (const line of pdbData.split('\n')) {
+    if (!line.startsWith('ATOM') && !line.startsWith('HETATM')) continue
+
+    const chain = line.substring(21, 22).trim() || 'A'
+    const residueNum = line.substring(22, 26).trim()
+    const atomName = line.substring(12, 16).trim()
+    if (!residueNum) continue
+
+    atoms += 1
+    chainSet.add(chain)
+    const residueKey = `${chain}:${residueNum}`
+    residueSet.add(residueKey)
+    if (atomName === 'CA') {
+      caResidueSet.add(residueKey)
+    }
+  }
+
+  return {
+    atoms,
+    residues: residueSet.size,
+    chains: Array.from(chainSet).sort(),
+    caResidues: caResidueSet.size,
+  }
+}
+
+async function copyTextToClipboard(text: string) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall back to execCommand below
+  }
+
+  try {
+    if (typeof document === 'undefined') return false
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'absolute'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
 export default function ResultsViewer({ job, onIterate }: Props) {
   const [expandedDesign, setExpandedDesign] = useState<number | null>(0)
   const [show3DViewer, setShow3DViewer] = useState(false)
@@ -71,6 +136,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   const inputSequence = typeof job.input?.sequence === 'string' ? job.input.sequence : ''
 
   const targetPdb = useMemo(() => extractPDB(job.results?.target_structure), [job.results?.target_structure])
+  const targetStructureSummary = useMemo(() => summarizePdb(targetPdb), [targetPdb])
 
   const designs = useMemo(() => {
     return (job.results?.designs || []).map((design) => {
@@ -80,10 +146,12 @@ export default function ResultsViewer({ job, onIterate }: Props) {
       const bindingScore = stableScore(sequence, design.design_id)
       const lengthDelta = inputSequence ? sequence.length - inputSequence.length : null
       const sameLength = Boolean(inputSequence) && inputSequence.length === sequence.length
+      const structureSummary = summarizePdb(pdbData)
       return {
         ...design,
         sequence,
         pdbData,
+        structureSummary,
         diff,
         bindingScore,
         lengthDelta,
@@ -211,6 +279,28 @@ export default function ResultsViewer({ job, onIterate }: Props) {
             <div className="rounded-2xl border border-white/10 bg-slate-950 p-4 font-mono text-xs text-emerald-300">
               <pre className="overflow-auto whitespace-pre-wrap break-words">{formatPdbPreview(targetPdb)}</pre>
             </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              <CompactStat label="Atoms" value={String(targetStructureSummary.atoms)} testId="target-structure-atoms" />
+              <CompactStat
+                label="Residues"
+                value={String(targetStructureSummary.residues)}
+                testId="target-structure-residues"
+              />
+              <CompactStat
+                label="Chains"
+                value={targetStructureSummary.chains.length ? targetStructureSummary.chains.join(', ') : 'n/a'}
+                testId="target-structure-chains"
+              />
+              <CompactStat
+                label="CA coverage"
+                value={
+                  targetStructureSummary.residues > 0
+                    ? `${targetStructureSummary.caResidues}/${targetStructureSummary.residues}`
+                    : '0/0'
+                }
+                testId="target-structure-ca"
+              />
+            </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 onClick={() => downloadPDB(targetPdb, `${job.job_id}_target.pdb`)}
@@ -335,6 +425,37 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                               <CompactStat label="3D structure" value={design.structureStatus} />
                             </div>
 
+                            <div className="grid gap-2 sm:grid-cols-4">
+                              <CompactStat
+                                label="Atoms"
+                                value={String(design.structureSummary.atoms)}
+                                testId={`design-structure-atoms-${design.design_id}`}
+                              />
+                              <CompactStat
+                                label="Residues"
+                                value={String(design.structureSummary.residues)}
+                                testId={`design-structure-residues-${design.design_id}`}
+                              />
+                              <CompactStat
+                                label="Chains"
+                                value={
+                                  design.structureSummary.chains.length
+                                    ? design.structureSummary.chains.join(', ')
+                                    : 'n/a'
+                                }
+                                testId={`design-structure-chains-${design.design_id}`}
+                              />
+                              <CompactStat
+                                label="CA coverage"
+                                value={
+                                  design.structureSummary.residues > 0
+                                    ? `${design.structureSummary.caResidues}/${design.structureSummary.residues}`
+                                    : '0/0'
+                                }
+                                testId={`design-structure-ca-${design.design_id}`}
+                              />
+                            </div>
+
                             <div className="grid gap-2 sm:grid-cols-2">
                               <button
                                 onClick={() => downloadPDB(design.pdbData, `${job.job_id}_design_${design.design_id + 1}.pdb`)}
@@ -355,6 +476,15 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                                 className="rounded-xl bg-violet-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                               >
                                 View 3D
+                              </button>
+                              <button
+                                data-testid={`copy-design-sequence-${design.design_id}`}
+                                onClick={async () => {
+                                  await copyTextToClipboard(design.sequence)
+                                }}
+                                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                              >
+                                Copy sequence
                               </button>
                               <button
                                 data-testid={`save-design-${design.design_id}`}
@@ -426,20 +556,18 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                     data-testid={`library-item-${item.id}`}
                     className="rounded-2xl border border-white/10 bg-white/5 p-3"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-400">
-                          {item.source || 'Saved'}
-                          {item.score !== undefined ? ` · score ${item.score}` : ''}
-                        </div>
-                        <div
-                          data-testid={`library-sequence-${item.id}`}
-                          className="mt-1 break-all font-mono text-xs text-slate-100"
-                        >
-                          {item.sequence}
-                        </div>
+                    <div className="min-w-0">
+                      <div className="text-xs text-slate-400">
+                        {item.source || 'Saved'}
+                        {item.score !== undefined ? ` · score ${item.score}` : ''}
                       </div>
-                      <div className="flex shrink-0 flex-col gap-2">
+                      <div
+                        data-testid={`library-sequence-${item.id}`}
+                        className="mt-1 break-all font-mono text-xs text-slate-100"
+                      >
+                        {item.sequence}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
                         {onIterate && (
                           <button
                             data-testid={`library-iterate-${item.id}`}
@@ -467,11 +595,20 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                                 item.sequence
                               )
                             }
-                            className="rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-400"
-                          >
-                            View 3D
-                          </button>
-                        )}
+                          className="rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-400"
+                        >
+                          View 3D
+                        </button>
+                      )}
+                        <button
+                          data-testid={`library-copy-sequence-${item.id}`}
+                          onClick={async () => {
+                            await copyTextToClipboard(item.sequence)
+                          }}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                        >
+                          Copy sequence
+                        </button>
                         <button
                           data-testid={`library-remove-${item.id}`}
                           onClick={() => removeFromDesignLibrary(item.id)}
@@ -576,11 +713,13 @@ function DesignPill({
   )
 }
 
-function CompactStat({ label, value }: { label: string; value: string }) {
+function CompactStat({ label, value, testId }: { label: string; value: string; testId?: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-950/70 px-3 py-3">
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-2 text-sm font-semibold text-slate-100">{value}</div>
+      <div data-testid={testId} className="mt-2 text-sm font-semibold text-slate-100">
+        {value}
+      </div>
     </div>
   )
 }

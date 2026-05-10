@@ -108,6 +108,10 @@ test.describe('Results viewer', () => {
     await expect(page.getByText('Target Structure')).toBeVisible()
     await expect(page.getByText(/Generated Designs/i)).toBeVisible()
     await expect(page.getByText(/Binder Sequence/i)).toBeVisible()
+    await expect(page.getByTestId('target-structure-atoms')).toHaveText('6')
+    await expect(page.getByTestId('target-structure-residues')).toHaveText('2')
+    await expect(page.getByTestId('target-structure-chains')).toHaveText('A')
+    await expect(page.getByTestId('target-structure-ca')).toHaveText('2/2')
 
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: /Download All Results/i }).click()
@@ -214,6 +218,26 @@ test.describe('Results viewer', () => {
 
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
+  })
+
+  test('results cards surface structure summaries and copy sequence actions', async ({ page }) => {
+    const job = makeCompletedJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await expect(page.getByTestId('design-structure-atoms-0')).toHaveText('6')
+    await expect(page.getByTestId('design-structure-residues-0')).toHaveText('2')
+    await expect(page.getByTestId('design-structure-chains-0')).toHaveText('A')
+    await expect(page.getByTestId('design-structure-ca-0')).toHaveText('2/2')
+
+    await page.getByTestId('copy-design-sequence-0').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe(job.input.sequence)
+
+    await page.getByTestId('save-design-0').click()
+    await page.getByTestId(/^library-copy-sequence-/).click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe(job.input.sequence)
   })
 
   test('3D viewer supports chain filtering and residue focus controls', async ({ page }) => {
