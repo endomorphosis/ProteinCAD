@@ -97,7 +97,7 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
-// tan(30°) ≈ 0.577, the fallback half-FOV tangent used when the camera tangent is invalid.
+// tan(30°) ≈ 0.577, used when the camera FOV tangent becomes non-finite or too small to frame safely.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
 const MAX_RENDERER_PIXEL_RATIO = 2
@@ -930,7 +930,8 @@ export default function ProteinViewer3D({
     const tangent = Math.tan(fov / 2)
     const safeTangent =
       Number.isFinite(tangent) && tangent > MIN_CAMERA_TANGENT ? tangent : DEFAULT_CAMERA_TAN_HALF_FOV
-    const distance = (maxDim / 2) / Math.max(safeTangent, MIN_CAMERA_TANGENT)
+    const validatedTangent = Math.max(safeTangent, MIN_CAMERA_TANGENT)
+    const distance = (maxDim / 2) / validatedTangent
 
     camera.position.set(center.x + distance * 0.35, center.y + distance * 0.25, center.z + distance * 1.35)
     camera.near = Math.max(0.1, distance / 100)

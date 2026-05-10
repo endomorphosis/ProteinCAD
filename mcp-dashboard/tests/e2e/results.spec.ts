@@ -13,7 +13,7 @@ TER
 END
 `
 
-const LAYOUT_TOLERANCE_PX = 1
+const SEQUENCE_MAP_LAYOUT_TOLERANCE_PX = 1
 
 function makeCompletedJob() {
   return {
@@ -365,7 +365,7 @@ test.describe('Results viewer', () => {
     const canvasBox = await page.locator('canvas').boundingBox()
     const sequenceMapBox = await page.getByTestId('viewer-sequence-map').boundingBox()
     expect((sequenceMapBox?.y || 0)).toBeGreaterThanOrEqual(
-      (canvasBox?.y || 0) + (canvasBox?.height || 0) - LAYOUT_TOLERANCE_PX
+      (canvasBox?.y || 0) + (canvasBox?.height || 0) - SEQUENCE_MAP_LAYOUT_TOLERANCE_PX
     )
 
     await page.getByTestId('viewer-chain-hotspots-B').click()
