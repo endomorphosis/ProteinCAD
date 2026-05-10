@@ -1,19 +1,23 @@
-# Start Here (non-ML friendly)
+# Start Here (non-ML-friendly)
 
-This project can run on **AMD64 (x86_64)** and **ARM64 (aarch64)**.
+This project runs on **AMD64 (x86_64)** and **ARM64 (aarch64)**.
 
-If you only want the web UI (Dashboard) and a working end-to-end demo, follow this page.
+If you only want the web UI (Dashboard) and a working end-to-end demo, follow the steps on this page.
+
+---
 
 ## 1) One-click start (VS Code)
 
 1. Open this folder in VS Code.
-2. Press `Ctrl+Shift+P` → run **Tasks: Run Task**.
+2. Press `Ctrl+Shift+P` → **Tasks: Run Task**.
 3. Select **Stack: Start + Open Dashboard**.
 
-That's it — it will:
-- auto-pick the correct stack for your computer (ARM64 vs AMD64)
-- build containers (first run takes longer)
+It will:
+- auto-detect your platform (ARM64 vs AMD64)
+- build containers on first run
 - open the Dashboard in your browser
+
+---
 
 ## 2) One-command start (Terminal)
 
@@ -23,22 +27,25 @@ From the repo root:
 ./scripts/run_dashboard_stack.sh up -d --build
 ```
 
-Open the Dashboard:
-- http://localhost:3000
+Open the Dashboard at `http://localhost:3000`.
 
-## 3) Quick health check (recommended)
+---
 
-If anything feels "stuck", run:
+## 3) Quick health check
+
+If anything feels stuck, run the diagnostics script:
 
 ```bash
 ./scripts/doctor_stack.sh
 ```
 
-It prints a simple checklist (Docker OK, services OK, URLs OK) and the current service status.
+It prints a checklist (Docker OK, services OK, URLs OK) and the current service status.
+
+---
 
 ## 4) Submit a demo job
 
-This confirms the MCP server + dashboard pipeline wiring is working:
+Confirms the MCP server + dashboard pipeline wiring is working:
 
 ```bash
 ./scripts/submit_demo_job.sh
@@ -46,65 +53,73 @@ This confirms the MCP server + dashboard pipeline wiring is working:
 
 Then open the Dashboard and look for the new job.
 
-## 5) (Optional) Zero-Touch Native Installer
+---
 
-If you want the native toolchain (AlphaFold, RFDiffusion, ProteinMPNN) plus MMseqs2 databases built automatically:
+## 5) (Optional) Zero-touch native installer
+
+To install the full native toolchain (AlphaFold, RFDiffusion, ProteinMPNN) plus MMseqs2 databases — including automatic GPU acceleration:
 
 ```bash
-# Minimal DBs (fastest)
+# Minimal DBs — fastest download (~5 GB, ~15 min)
 bash scripts/install_all_native.sh --minimal
 
-# Recommended DBs (dev)
+# Recommended DBs — dev use (~50 GB, ~1 hour)
 bash scripts/install_all_native.sh --recommended
 
-# Full DBs (production)
+# Full DBs — production (~2.3 TB, ~6 hours)
 bash scripts/install_all_native.sh --full
 ```
 
 What it does:
 - Installs tools into `~/miniforge3/envs/alphafold2`
-- Downloads AlphaFold DBs for the chosen tier
-- Builds MMseqs2 databases to `~/.cache/alphafold/mmseqs2` (GPU-accelerated when available)
-- Skips already-built tiers automatically
+- Downloads AlphaFold databases for the chosen tier
+- Builds MMseqs2 databases to `~/.cache/alphafold/mmseqs2`
+- Auto-configures GPU acceleration (5–10× MSA speedup) when an NVIDIA GPU is detected
 
-## 5) Choose backend + fallback order
+---
+
+## 6) Choose backend + fallback order
 
 In the Dashboard header, click **Settings** to choose how model calls are routed:
-- **NIM** (NVIDIA NIM services)
-- **External** (any compatible REST services you run elsewhere)
-- **Embedded** (last-resort: run inside the MCP server container; currently only supports ProteinMPNN when present)
+- **NIM** — NVIDIA NIM services (AMD64, requires NGC API key)
+- **External** — any compatible REST services you run elsewhere
+- **Embedded** — runs inside the MCP server container (ProteinMPNN supported when weights are present)
 
-Use **fallback** mode to try providers in order (recommended). These settings persist across restarts when using the provided Docker compose stacks.
+Use **fallback** mode to try providers in priority order. Settings persist across restarts when using the provided Docker compose stacks.
 
-Tip: This repo sometimes has *two* MCP server ports in play:
-- Stack server: `http://localhost:${MCP_SERVER_HOST_PORT:-8011}` (used by the dashboard stacks)
-- Standalone local MCP server: `http://localhost:8010` (used by some demos/tools)
+---
 
 ## Common questions
 
 ### "Some services show not_ready or disabled"
 
 That's normal depending on platform and configuration:
-- On **AMD64**, the NIM model services can run natively (best supported).
-- On **ARM64**, the repo includes an ARM64-native stack, but some heavyweight models may require additional model downloads/configuration.
+- On **AMD64**, NIM model services run natively (best supported).
+- On **ARM64**, the repo includes an ARM64-native stack, but some models may require additional download/configuration.
 
-If you're unsure what you're seeing, run `./scripts/doctor_stack.sh` and share the output.
+Run `./scripts/doctor_stack.sh` and share the output if you're unsure.
 
 ### "Port 3000 is already in use"
-
-Run with a different dashboard port:
 
 ```bash
 MCP_DASHBOARD_HOST_PORT=3005 ./scripts/run_dashboard_stack.sh up -d --build
 ```
 
+### "Two MCP server ports?"
+
+- Stack server: `http://localhost:${MCP_SERVER_HOST_PORT:-8011}` — used by dashboard stacks
+- Standalone local MCP server: `http://localhost:8010` — used by some demos/tools
+
+---
+
 ## Where to go next
 
-- **🔥 FOR AI AGENTS & CONTRIBUTORS**: [INSTITUTIONAL_KNOWLEDGE.md](INSTITUTIONAL_KNOWLEDGE.md) - Complete GPU/MMseqs2 optimization history (**READ THIS FIRST!**)
-- Docs index: [docs/INDEX.md](docs/INDEX.md)
-- Agent guide (how to run things deterministically): [docs/AGENTS.md](docs/AGENTS.md)
-- **GPU Integration Complete**: [INTEGRATION_COMPLETE.md](INTEGRATION_COMPLETE.md) - All GPU/CUDA 13.1/MMseqs2 work (34/34 checks passing)
-- **Zero-Touch GPU Setup**: [ZERO_TOUCH_GPU_COMPLETE.md](ZERO_TOUCH_GPU_COMPLETE.md) - Automated GPU configuration
-- **MMseqs2 GPU Quickstart**: [docs/MMSEQS2_GPU_QUICKSTART.md](docs/MMSEQS2_GPU_QUICKSTART.md) - User guide for 10x speedup
-- MCP + Docker guide: [docs/DOCKER_MCP_README.md](docs/DOCKER_MCP_README.md)
-- Platform guidance: [scripts/detect_platform.sh](scripts/detect_platform.sh)
+| Goal | Document |
+|------|----------|
+| Full docs index | [docs/INDEX.md](docs/INDEX.md) |
+| Architecture overview | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Agent / contributor guide | [docs/AGENTS.md](docs/AGENTS.md) |
+| AlphaFold performance tuning | [docs/ALPHAFOLD_OPTIMIZATION_GUIDE.md](docs/ALPHAFOLD_OPTIMIZATION_GUIDE.md) |
+| MMseqs2 GPU acceleration | [docs/MMSEQS2_GPU_QUICKSTART.md](docs/MMSEQS2_GPU_QUICKSTART.md) |
+| Docker + MCP stack details | [docs/DOCKER_MCP_README.md](docs/DOCKER_MCP_README.md) |
+| GPU/MMseqs2 institutional knowledge | [INSTITUTIONAL_KNOWLEDGE.md](INSTITUTIONAL_KNOWLEDGE.md) |
