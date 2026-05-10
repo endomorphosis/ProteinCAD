@@ -194,6 +194,16 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('2')
     await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText(job.input.sequence[1])
 
+    await page.getByTestId('viewer-focus-selection').click()
+    await expect(page.getByText(/Centered 1 selected residue/i)).toBeVisible()
+    await page.getByTestId('viewer-auto-rotate').click()
+    await expect(page.getByTestId('viewer-auto-rotate')).toHaveText(/Auto-rotate on/i)
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByTestId('viewer-snapshot').click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/target-structure\.png$/)
+
     await page.getByRole('button', { name: 'Close 3D Viewer' }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeHidden()
   })

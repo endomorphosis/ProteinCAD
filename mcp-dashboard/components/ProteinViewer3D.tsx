@@ -564,6 +564,7 @@ export default function ProteinViewer3D({
   const [selectedChain, setSelectedChain] = useState('all')
   const [focusResidue, setFocusResidue] = useState('')
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
+  const [autoRotate, setAutoRotate] = useState(false)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -636,6 +637,12 @@ export default function ProteinViewer3D({
   }, [selectedChain])
 
   useEffect(() => {
+    if (controlsRef.current) {
+      controlsRef.current.autoRotate = autoRotate
+    }
+  }, [autoRotate])
+
+  useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
@@ -685,6 +692,46 @@ export default function ProteinViewer3D({
     if (!molecule) return
     frameCurrentMolecule(new THREE.Box3().setFromObject(molecule))
     setAnalysisMessage(null)
+  }
+
+  const focusSelection = () => {
+    if (selectedResidueDetails.length === 0) {
+      setAnalysisMessage('Select at least one residue to center the camera.')
+      return
+    }
+
+    const box = new THREE.Box3().setFromPoints(selectedResidueDetails.map((item) => item.center.clone()))
+    box.expandByScalar(Math.max(2, selectedResidueDetails.length * 0.35))
+    frameCurrentMolecule(box)
+    setAnalysisMessage(
+      `Centered ${selectedResidueDetails.length} selected residue${
+        selectedResidueDetails.length === 1 ? '' : 's'
+      }.`
+    )
+  }
+
+  const downloadSnapshot = async () => {
+    const renderer = rendererRef.current
+    if (!renderer) {
+      setAnalysisMessage('3D canvas is not ready yet.')
+      return
+    }
+
+    const filename = `${(title || 'protein-viewer')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'protein-viewer'}.png`
+
+    try {
+      const dataUrl = renderer.domElement.toDataURL('image/png')
+      const link = document.createElement('a')
+      link.href = dataUrl
+      link.download = filename
+      link.click()
+      setAnalysisMessage(`Saved viewer snapshot as ${filename}.`)
+    } catch {
+      setAnalysisMessage('Unable to export a PNG snapshot from this browser context.')
+    }
   }
 
   const focusOnResidue = () => {
@@ -846,12 +893,13 @@ export default function ProteinViewer3D({
       container.appendChild(renderer.domElement)
       rendererRef.current = renderer
 
-      const controls = new OrbitControls(camera, renderer.domElement)
-      controls.enableDamping = true
-      controls.dampingFactor = 0.06
-      controls.minDistance = 6
-      controls.maxDistance = 240
-      controlsRef.current = controls
+       const controls = new OrbitControls(camera, renderer.domElement)
+       controls.enableDamping = true
+       controls.dampingFactor = 0.06
+       controls.autoRotateSpeed = 1.2
+       controls.minDistance = 6
+       controls.maxDistance = 240
+       controlsRef.current = controls
 
       scene.add(new THREE.AmbientLight(0xffffff, 1.1))
 
@@ -992,8 +1040,8 @@ export default function ProteinViewer3D({
           </button>
         </div>
 
-        <div className="grid flex-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="flex min-h-0 min-w-0 flex-col border-b border-white/10 xl:border-b-0 xl:border-r">
+        <div className="grid flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="flex min-h-0 min-w-0 flex-col border-b border-white/10 lg:border-b-0 lg:border-r">
             <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
               {([
                 ['ribbon', 'Ribbon'],
@@ -1033,6 +1081,34 @@ export default function ProteinViewer3D({
                 Reset view
               </button>
 
+              <button
+                data-testid="viewer-focus-selection"
+                onClick={focusSelection}
+                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Center selection
+              </button>
+
+              <button
+                data-testid="viewer-auto-rotate"
+                onClick={() => setAutoRotate((prev) => !prev)}
+                className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                  autoRotate
+                    ? 'bg-emerald-400 text-slate-950'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                {autoRotate ? 'Auto-rotate on' : 'Auto-rotate off'}
+              </button>
+
+              <button
+                data-testid="viewer-snapshot"
+                onClick={downloadSnapshot}
+                className="rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Save PNG
+              </button>
+
               <div className="ml-auto text-xs text-slate-400">Rotate: drag · Zoom: scroll · Select: click residues</div>
             </div>
 
@@ -1046,7 +1122,7 @@ export default function ProteinViewer3D({
               />
             </div>
 
-            <div className="flex-1 bg-slate-950/60">
+            <div className="min-h-[340px] flex-1 bg-slate-950/60 sm:min-h-[420px] lg:min-h-0">
               {error ? (
                 <div className="flex h-full items-center justify-center px-6 text-center">
                   <div>
