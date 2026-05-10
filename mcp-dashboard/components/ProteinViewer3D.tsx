@@ -97,7 +97,7 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
-// tan(30°) ≈ 0.577, the half-angle tangent for a 60° fallback camera field-of-view.
+// tan(60° / 2) ≈ 0.577, the fallback half-FOV tangent used when the camera tangent is invalid.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
 
