@@ -13,6 +13,7 @@ TER
 END
 `
 
+// Allow a 1px tolerance because browser layout rounding can vary slightly at mobile widths.
 const SEQUENCE_MAP_LAYOUT_TOLERANCE_PX = 1
 
 function makeCompletedJob() {

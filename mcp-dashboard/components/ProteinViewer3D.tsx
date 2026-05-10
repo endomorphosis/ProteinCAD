@@ -1235,14 +1235,14 @@ export default function ProteinViewer3D({
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_RENDERER_PIXEL_RATIO))
-       renderer.setSize(width, height)
-       renderer.outputColorSpace = THREE.SRGBColorSpace
-       container.appendChild(renderer.domElement)
-       rendererRef.current = renderer
+      renderer.setSize(width, height)
+      renderer.outputColorSpace = THREE.SRGBColorSpace
+      container.appendChild(renderer.domElement)
+      rendererRef.current = renderer
 
-       const controls = new OrbitControls(camera, renderer.domElement)
-       controls.enableDamping = true
-       controls.dampingFactor = 0.06
+      const controls = new OrbitControls(camera, renderer.domElement)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.06
        controls.autoRotateSpeed = 1.2
        controls.minDistance = 6
        controls.maxDistance = 240
