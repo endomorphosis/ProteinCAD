@@ -365,6 +365,13 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-selection-pair')).toContainText('B:9 SER')
     await expect(page.getByTestId('viewer-selection-pair')).toContainText('B:10 TYR')
     await expect(page.getByTestId('viewer-selection-distance')).toContainText('Å')
+    await page.getByTestId('viewer-selection-copy-pair').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:9 SER/)
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:10 TYR/)
+    await page.getByTestId('viewer-selection-use-pair').click()
+    await expect(page.getByTestId('viewer-analysis-positions-input')).toHaveValue(/9/)
+    await expect(page.getByTestId('viewer-analysis-positions-input')).toHaveValue(/10/)
+    await expect(page.getByTestId('viewer-selection-spotlight-index')).toHaveText('2 / 2')
     await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:9 SER/)
     await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:10 TYR/)
 

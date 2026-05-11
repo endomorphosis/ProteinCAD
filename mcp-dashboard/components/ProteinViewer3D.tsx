@@ -702,6 +702,8 @@ export default function ProteinViewer3D({
       | {
           left: string
           right: string
+          leftSelection: ResidueSelection
+          rightSelection: ResidueSelection
           distance: number
         }
       | null = null
@@ -713,6 +715,16 @@ export default function ProteinViewer3D({
           farthestPair = {
             left: formatResidueSelection(selectedResidueDetails[left]),
             right: formatResidueSelection(selectedResidueDetails[right]),
+            leftSelection: {
+              chain: selectedResidueDetails[left].chain,
+              residueNum: selectedResidueDetails[left].residueNum,
+              residue: selectedResidueDetails[left].residue,
+            },
+            rightSelection: {
+              chain: selectedResidueDetails[right].chain,
+              residueNum: selectedResidueDetails[right].residueNum,
+              residue: selectedResidueDetails[right].residue,
+            },
             distance,
           }
         }
@@ -919,6 +931,31 @@ export default function ProteinViewer3D({
     const text = selectionAnalytics.labels.join(', ')
     const copied = await copyTextToClipboard(text)
     setAnalysisMessage(copied ? `Copied selected residues ${text}.` : `Selected residues ready to copy: ${text}.`)
+  }
+
+  const selectFarthestPair = () => {
+    if (!selectionAnalytics?.farthestPair) {
+      setAnalysisMessage('Select at least two residues before using the farthest pair.')
+      return
+    }
+
+    const pair = selectionAnalytics.farthestPair
+    applySelection(
+      [pair.leftSelection, pair.rightSelection],
+      `Selected farthest pair ${pair.left} ↔ ${pair.right} (${pair.distance.toFixed(1)} Å).`
+    )
+  }
+
+  const copyFarthestPair = async () => {
+    if (!selectionAnalytics?.farthestPair) {
+      setAnalysisMessage('Select at least two residues before copying a measured pair.')
+      return
+    }
+
+    const pair = selectionAnalytics.farthestPair
+    const text = `${pair.left} ↔ ${pair.right} (${pair.distance.toFixed(1)} Å)`
+    const copied = await copyTextToClipboard(text)
+    setAnalysisMessage(copied ? `Copied widest pair ${text}.` : `Widest pair ready to copy: ${text}.`)
   }
 
   const focusSelectionFromSpotlight = (selection: ResidueSelection) => {
@@ -2241,6 +2278,24 @@ export default function ProteinViewer3D({
                       </div>
                       <div data-testid="viewer-selection-distance" className="mt-1 text-xs text-slate-400">
                         {selectionAnalytics.farthestPair.distance.toFixed(1)} Å
+                      </div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          data-testid="viewer-selection-use-pair"
+                          onClick={selectFarthestPair}
+                          className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/15"
+                        >
+                          Use pair as selection
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="viewer-selection-copy-pair"
+                          onClick={copyFarthestPair}
+                          className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/15"
+                        >
+                          Copy pair
+                        </button>
                       </div>
                     </>
                   ) : (
