@@ -103,6 +103,7 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
+const SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 8
 // Fallback half-FOV tangent (tan(30°) ≈ 0.577) used when camera-derived values are unavailable or too small.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
@@ -942,6 +943,43 @@ export default function ProteinViewer3D({
     focusSelectionFromSpotlight(target)
   }
 
+  const selectNearbyResiduesFromSpotlight = () => {
+    if (!selectionSummary) {
+      setAnalysisMessage('Select a residue before finding nearby contacts.')
+      return
+    }
+
+    const primaryCenter = selectionSummary.primary.center
+    const nearby = parsed.residues
+      .map((residue) => {
+        const center = residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center
+        return {
+          chain: residue.chain,
+          residueNum: residue.residueNum,
+          residue: residue.residue,
+          distance: center.distanceTo(primaryCenter),
+        }
+      })
+      .filter((item) => item.distance <= SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM)
+      .sort((left, right) => left.distance - right.distance || left.residueNum - right.residueNum)
+      .slice(0, 24)
+      .map(({ chain, residueNum, residue }) => ({ chain, residueNum, residue }))
+
+    if (nearby.length === 0) {
+      setAnalysisMessage(
+        `No residues found within ${SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM} Å of ${selectionSummary.primary.chain}:${selectionSummary.primary.residueNum}.`
+      )
+      return
+    }
+
+    applySelection(
+      nearby,
+      `Selected ${nearby.length} residue${nearby.length === 1 ? '' : 's'} within ${
+        SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM
+      } Å of ${selectionSummary.primary.chain}:${selectionSummary.primary.residueNum}.`
+    )
+  }
+
   const scrollToVariantProposal = () => {
     if (!variantSectionRef.current) {
       setAnalysisMessage('Variant proposal controls are not available for this structure.')
@@ -1603,6 +1641,14 @@ export default function ProteinViewer3D({
                       className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-slate-50 transition hover:bg-white/15"
                     >
                       Copy residues
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="viewer-selection-spotlight-nearby"
+                      onClick={selectNearbyResiduesFromSpotlight}
+                      className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
+                    >
+                      Nearby (≤{SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM} Å)
                     </button>
                     <button
                       type="button"
