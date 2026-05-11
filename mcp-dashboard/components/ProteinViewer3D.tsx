@@ -925,6 +925,48 @@ export default function ProteinViewer3D({
     }, 0)
   }
 
+  const selectChainResidues = (chain: string) => {
+    const residues = parsed.residues
+      .filter((residue) => residue.chain === chain)
+      .map((residue) => ({
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+      }))
+
+    if (residues.length === 0) {
+      setAnalysisMessage(`No residues are available in chain ${chain}.`)
+      return
+    }
+
+    if (selectedChain !== chain) {
+      setSelectedChain(chain)
+    }
+
+    applySelection(
+      residues,
+      `Selected all ${residues.length} residue${residues.length === 1 ? '' : 's'} in chain ${chain}.`
+    )
+  }
+
+  const copyChainPositions = async (chain: string) => {
+    const positions = Array.from(
+      new Set(parsed.residues.filter((residue) => residue.chain === chain).map((residue) => residue.residueNum))
+    ).sort((left, right) => left - right)
+    if (positions.length === 0) {
+      setAnalysisMessage(`No positions are available in chain ${chain}.`)
+      return
+    }
+
+    const text = positions.join(',')
+    const copied = await copyTextToClipboard(text)
+    setAnalysisMessage(
+      copied
+        ? `Copied ${positions.length} position${positions.length === 1 ? '' : 's'} for chain ${chain}.`
+        : `Chain ${chain} positions ready to copy: ${text}.`
+    )
+  }
+
   const copySelectedPositions = async () => {
     if (!positionsText.trim()) {
       setAnalysisMessage('Select residues before copying variant positions.')
@@ -2195,6 +2237,22 @@ export default function ProteinViewer3D({
                         <InspectorStat label="Residues" value={String(summary.residueCount)} />
                       </div>
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <button
+                          data-testid={`viewer-chain-select-${summary.chain}`}
+                          onClick={() => selectChainResidues(summary.chain)}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                        >
+                          Select chain residues
+                        </button>
+                        <button
+                          data-testid={`viewer-chain-copy-positions-${summary.chain}`}
+                          onClick={() => copyChainPositions(summary.chain)}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                        >
+                          Copy chain positions
+                        </button>
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
                         <button
                           data-testid={`viewer-chain-solo-${summary.chain}`}
                           onClick={() => setSelectedChain((prev) => (prev === summary.chain ? 'all' : summary.chain))}

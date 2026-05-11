@@ -312,6 +312,12 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-chain-card-A')).toBeVisible()
     await expect(page.getByTestId('viewer-chain-card-B')).toBeVisible()
 
+    await page.getByTestId('viewer-chain-select-B').click()
+    await expect(page.getByTestId('variant-positions')).toHaveValue('9,10')
+    await expect(page.getByText(/Selected all 2 residues in chain B/i)).toBeVisible()
+    await page.getByTestId('viewer-chain-copy-positions-B').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('9,10')
+
     await page.getByTestId('viewer-chain-hotspots-B').click()
     await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('B')
     await expect(page.getByTestId('variant-positions')).toHaveValue('9,10')
