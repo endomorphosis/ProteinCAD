@@ -104,6 +104,8 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 
 const DEFAULT_NUM_VARIANTS = 5
 const SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 8
+const MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 2
+const MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 20
 // Fallback half-FOV tangent (tan(30°) ≈ 0.577350269...) used when camera-derived values are unavailable.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
@@ -626,6 +628,7 @@ export default function ProteinViewer3D({
   const [focusResidue, setFocusResidue] = useState('')
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [autoRotate, setAutoRotate] = useState(false)
+  const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -852,6 +855,20 @@ export default function ProteinViewer3D({
     return Array.from(new Set(nums)).sort((a, b) => a - b)
   }
 
+  const formatAngstrom = (value: number) => {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '')
+  }
+
+  const updateNeighborRadius = (value: number) => {
+    if (!Number.isFinite(value)) return
+    setNeighborRadiusAngstrom(
+      Math.min(
+        MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM,
+        Math.max(MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM, Number(value.toFixed(1)))
+      )
+    )
+  }
+
   const updateNumVariants = (value: number) => {
     setNumVariants(
       Number.isFinite(value) && value >= 1 ? Math.min(20, Math.floor(value)) : DEFAULT_NUM_VARIANTS
@@ -987,6 +1004,10 @@ export default function ProteinViewer3D({
       return
     }
 
+    const effectiveNeighborRadius = Number.isFinite(neighborRadiusAngstrom)
+      ? neighborRadiusAngstrom
+      : SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM
+    const neighborRadiusLabel = formatAngstrom(effectiveNeighborRadius)
     const primaryCenter = selectionSummary.primary.center
     const nearby = parsed.residues
       .map((residue) => {
@@ -998,23 +1019,23 @@ export default function ProteinViewer3D({
           distance: center.distanceTo(primaryCenter),
         }
       })
-      .filter((item) => item.distance <= SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM)
+      .filter((item) => item.distance <= effectiveNeighborRadius)
       .sort((left, right) => left.distance - right.distance || left.residueNum - right.residueNum)
       .slice(0, 24)
       .map(({ chain, residueNum, residue }) => ({ chain, residueNum, residue }))
 
     if (nearby.length === 0) {
       setAnalysisMessage(
-        `No residues found within ${SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM} Å of ${selectionSummary.primary.chain}:${selectionSummary.primary.residueNum}.`
+        `No residues found within ${neighborRadiusLabel} Å of ${selectionSummary.primary.chain}:${selectionSummary.primary.residueNum}.`
       )
       return
     }
 
     applySelection(
       nearby,
-      `Selected ${nearby.length} residue${nearby.length === 1 ? '' : 's'} within ${
-        SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM
-      } Å of ${selectionSummary.primary.chain}:${selectionSummary.primary.residueNum}.`
+      `Selected ${nearby.length} residue${nearby.length === 1 ? '' : 's'} within ${neighborRadiusLabel} Å of ${
+        selectionSummary.primary.chain
+      }:${selectionSummary.primary.residueNum}.`
     )
   }
 
@@ -1686,7 +1707,7 @@ export default function ProteinViewer3D({
                       onClick={selectNearbyResiduesFromSpotlight}
                       className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
                     >
-                      Nearby (≤{SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM} Å)
+                      Nearby (≤{formatAngstrom(neighborRadiusAngstrom)} Å)
                     </button>
                     <button
                       type="button"
@@ -1704,6 +1725,34 @@ export default function ProteinViewer3D({
                     >
                       Clear selection
                     </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_96px]">
+                    <label className="block text-xs font-medium uppercase tracking-wide text-emerald-100/80">
+                      Nearby radius (Å)
+                      <input
+                        type="range"
+                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        step={0.5}
+                        value={neighborRadiusAngstrom}
+                        data-testid="viewer-selection-neighbor-radius-range"
+                        onChange={(event) => updateNeighborRadius(Number(event.target.value))}
+                        className="mt-2 h-1.5 w-full cursor-pointer accent-emerald-300"
+                      />
+                    </label>
+                    <label className="block text-xs font-medium uppercase tracking-wide text-emerald-100/80">
+                      Value
+                      <input
+                        type="number"
+                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        step={0.5}
+                        value={neighborRadiusAngstrom}
+                        data-testid="viewer-selection-neighbor-radius"
+                        onChange={(event) => updateNeighborRadius(Number.parseFloat(event.target.value))}
+                        className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-emerald-300/50"
+                      />
+                    </label>
                   </div>
                 </div>
               </div>
