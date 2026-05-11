@@ -103,9 +103,9 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 }
 
 const DEFAULT_NUM_VARIANTS = 5
-const SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 8
-const MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 2
-const MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 20
+const SPOTLIGHT_NEIGHBOR_RADIUS = 8
+const MIN_SPOTLIGHT_NEIGHBOR_RADIUS = 2
+const MAX_SPOTLIGHT_NEIGHBOR_RADIUS = 20
 // Fallback half-FOV tangent (tan(30°) ≈ 0.577350269...) used when camera-derived values are unavailable.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
@@ -628,7 +628,7 @@ export default function ProteinViewer3D({
   const [focusResidue, setFocusResidue] = useState('')
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [autoRotate, setAutoRotate] = useState(false)
-  const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM)
+  const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -863,8 +863,8 @@ export default function ProteinViewer3D({
     if (!Number.isFinite(value)) return
     setNeighborRadiusAngstrom(
       Math.min(
-        MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM,
-        Math.max(MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM, Number(value.toFixed(1)))
+        MAX_SPOTLIGHT_NEIGHBOR_RADIUS,
+        Math.max(MIN_SPOTLIGHT_NEIGHBOR_RADIUS, Number(value.toFixed(1)))
       )
     )
   }
@@ -1006,7 +1006,7 @@ export default function ProteinViewer3D({
 
     const effectiveNeighborRadius = Number.isFinite(neighborRadiusAngstrom)
       ? neighborRadiusAngstrom
-      : SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM
+      : SPOTLIGHT_NEIGHBOR_RADIUS
     const neighborRadiusLabel = formatAngstrom(effectiveNeighborRadius)
     const primaryCenter = selectionSummary.primary.center
     const nearby = parsed.residues
@@ -1705,6 +1705,7 @@ export default function ProteinViewer3D({
                       type="button"
                       data-testid="viewer-selection-spotlight-nearby"
                       onClick={selectNearbyResiduesFromSpotlight}
+                      aria-label={`Select nearby residues within ${formatAngstrom(neighborRadiusAngstrom)} angstroms`}
                       className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
                     >
                       Nearby (≤{formatAngstrom(neighborRadiusAngstrom)} Å)
@@ -1731,8 +1732,8 @@ export default function ProteinViewer3D({
                       Nearby radius (Å)
                       <input
                         type="range"
-                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
-                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS}
+                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS}
                         step={0.5}
                         value={neighborRadiusAngstrom}
                         data-testid="viewer-selection-neighbor-radius-range"
@@ -1744,8 +1745,8 @@ export default function ProteinViewer3D({
                       Value
                       <input
                         type="number"
-                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
-                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM}
+                        min={MIN_SPOTLIGHT_NEIGHBOR_RADIUS}
+                        max={MAX_SPOTLIGHT_NEIGHBOR_RADIUS}
                         step={0.5}
                         value={neighborRadiusAngstrom}
                         data-testid="viewer-selection-neighbor-radius"
