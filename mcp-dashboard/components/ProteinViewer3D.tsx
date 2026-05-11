@@ -104,10 +104,11 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
 
 const DEFAULT_NUM_VARIANTS = 5
 const SPOTLIGHT_NEIGHBOR_RADIUS_ANGSTROM = 8
-// Fallback half-FOV tangent (tan(30°) ≈ 0.577) used when camera-derived values are unavailable or too small.
+// Fallback half-FOV tangent (tan(30°) ≈ 0.577350269...) used when camera-derived values are unavailable.
 const DEFAULT_CAMERA_TAN_HALF_FOV = 0.577
 const MIN_CAMERA_TANGENT = 0.001
 const MAX_RENDERER_PIXEL_RATIO = 2
+const AUTO_ROTATE_SPEED = 1.2
 
 function residueKey(chain: string, residueNum: number) {
   return `${chain || '_'}:${residueNum}`
@@ -1281,7 +1282,7 @@ export default function ProteinViewer3D({
       const controls = new OrbitControls(camera, renderer.domElement)
       controls.enableDamping = true
       controls.dampingFactor = 0.06
-       controls.autoRotateSpeed = 1.2
+      controls.autoRotateSpeed = AUTO_ROTATE_SPEED
        controls.minDistance = 6
        controls.maxDistance = 240
        controlsRef.current = controls
