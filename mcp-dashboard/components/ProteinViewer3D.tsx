@@ -2521,7 +2521,9 @@ export default function ProteinViewer3D({
     </div>
   )
 
-  return typeof document === 'undefined' ? viewerContent : createPortal(viewerContent, document.body)
+  return typeof document === 'undefined' || !document.body
+    ? viewerContent
+    : createPortal(viewerContent, document.body)
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {

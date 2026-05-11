@@ -14,7 +14,7 @@ END
 `
 
 // Allow a 1px tolerance because browser layout rounding can vary slightly at mobile widths.
-const MOBILE_LAYOUT_TOLERANCE_PX = 1
+const VIEWPORT_LAYOUT_TOLERANCE_PX = 1
 
 function makeCompletedJob() {
   return {
@@ -393,7 +393,7 @@ test.describe('Results viewer', () => {
     const canvasBox = await page.locator('canvas').boundingBox()
     const sequenceMapBox = await page.getByTestId('viewer-sequence-map').boundingBox()
     expect((sequenceMapBox?.y || 0)).toBeGreaterThanOrEqual(
-      (canvasBox?.y || 0) + (canvasBox?.height || 0) - MOBILE_LAYOUT_TOLERANCE_PX
+      (canvasBox?.y || 0) + (canvasBox?.height || 0) - VIEWPORT_LAYOUT_TOLERANCE_PX
     )
 
     await page.getByTestId('viewer-chain-hotspots-B').click()
