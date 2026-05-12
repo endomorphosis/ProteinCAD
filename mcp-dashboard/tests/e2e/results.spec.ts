@@ -604,4 +604,75 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-selection-spotlight-clear').click()
     await expect(page.getByTestId('viewer-distance-card')).toBeHidden()
   })
+
+  test('3D viewer angle measurement shows when exactly 3 residues are selected', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    // Select exactly 3 residues via hotspots (analysis job B chain has 2, A has 2 → total 4)
+    // Use top-3 hotspots to get exactly 3
+    await page.getByTestId('viewer-hotspots-3').click()
+    await expect(page.getByText(/Selected 3 high B-factor hotspot/i)).toBeVisible()
+
+    // Angle card should appear
+    await expect(page.getByTestId('viewer-angle-card')).toBeVisible()
+    await expect(page.getByTestId('viewer-angle-value')).toContainText('°')
+
+    // Distance card should NOT appear (wrong count)
+    await expect(page.getByTestId('viewer-distance-card')).toBeHidden()
+
+    // Adding a 4th residue removes the angle card
+    await page.getByTestId('viewer-select-all').click()
+    await expect(page.getByTestId('viewer-angle-card')).toBeHidden()
+  })
+
+  test('3D viewer sequence map tokens show B-factor sparkline bars', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    // The sequence map should be visible
+    const seqMap = page.getByTestId('viewer-sequence-map')
+    await seqMap.scrollIntoViewIfNeeded()
+    await expect(seqMap).toBeVisible()
+
+    // Each token should contain a B-factor mini bar element
+    const firstToken = page.getByTestId('viewer-sequence-token-A-1')
+    await expect(firstToken).toBeVisible()
+    // The token should have a non-empty title containing B-factor info
+    await expect(firstToken).toHaveAttribute('title', /B-factor/)
+  })
+
+  test('3D viewer residue inspector shows neighbor count', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    // Select any residue
+    await page.getByTestId('viewer-hotspots-3').click()
+
+    // Residue inspector neighbor count should appear
+    const neighborCount = page.getByTestId('viewer-inspector-neighbor-count')
+    await neighborCount.scrollIntoViewIfNeeded()
+    await expect(neighborCount).toBeVisible()
+    // Should be a numeric value
+    const text = await neighborCount.textContent()
+    expect(Number(text?.trim())).toBeGreaterThanOrEqual(0)
+  })
 })

@@ -6,7 +6,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { addToDesignLibrary } from '@/lib/design-library'
 
-type RenderMode = 'ribbon' | 'cartoon' | 'sphere' | 'stick'
+type RenderMode = 'ribbon' | 'cartoon' | 'sphere' | 'stick' | 'surface'
 type SecondaryType = 'helix' | 'sheet' | 'turn' | 'coil'
 
 type Atom = {
@@ -99,6 +99,11 @@ const ELEMENT_COLORS: Record<string, number> = {
   H: 0xffffff,
   P: 0xf97316,
   default: 0xd946ef,
+}
+
+// Van der Waals radii (Å) for spacefill rendering
+const VDW_RADII: Record<string, number> = {
+  C: 1.70, N: 1.55, O: 1.52, S: 1.80, H: 1.20, P: 1.80, default: 1.50,
 }
 
 const SECONDARY_COLORS: Record<SecondaryType, number> = {
@@ -535,6 +540,102 @@ function createAtomicRepresentation(
   }
 }
 
+function createSpacefillRepresentation(
+  group: THREE.Group,
+  atoms: Atom[],
+  residues: ResidueSummary[],
+  model: ParseResult,
+  heatmap: boolean,
+  colorByChain: boolean,
+  selectedKeys: Set<string>
+) {
+  for (const atom of atoms) {
+    const isSelected = selectedKeys.has(residueKey(atom.chain, atom.residueNum))
+    const radius = (VDW_RADII[atom.element] || VDW_RADII.default) * (isSelected ? 1.08 : 1.0)
+    const color = heatmap
+      ? getBFactorColor(atom.bFactor, model.bFactorRange)
+      : colorByChain
+        ? chainPaletteColor(atom.chain, model.chains)
+        : new THREE.Color(ELEMENT_COLORS[atom.element] || ELEMENT_COLORS.default)
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 16, 12),
+      new THREE.MeshPhongMaterial({
+        color,
+        shininess: 50,
+        transparent: selectedKeys.size > 0 && !isSelected,
+        opacity: selectedKeys.size > 0 && !isSelected ? 0.15 : 1.0,
+      })
+    )
+    mesh.position.set(atom.x, atom.y, atom.z)
+    mesh.userData = {
+      kind: 'atom',
+      chain: atom.chain,
+      residueNum: atom.residueNum,
+      residue: atom.residue,
+      atomName: atom.atomName,
+    }
+    group.add(mesh)
+  }
+  for (const residue of residues) {
+    addHotspot(group, residue, residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center, selectedKeys)
+  }
+}
+
+// Draw 3D measurement lines between selected residue centers (2 = distance, 3 = angle)
+function addMeasurementLines(
+  group: THREE.Group,
+  selectedResidues: ResidueSelection[],
+  residueCenters: Map<string, THREE.Vector3>
+) {
+  const centers = selectedResidues
+    .map((s) => residueCenters.get(residueKey(s.chain, s.residueNum)))
+    .filter((c): c is THREE.Vector3 => c !== undefined)
+
+  if (centers.length < 2 || centers.length > 3) return
+
+  const pairs: Array<[THREE.Vector3, THREE.Vector3]> =
+    centers.length === 2
+      ? [[centers[0], centers[1]]]
+      : [[centers[0], centers[1]], [centers[1], centers[2]]]
+
+  const lineColor = centers.length === 2 ? 0xfbbf24 : 0x38bdf8
+
+  for (const [a, b] of pairs) {
+    const points = [a.clone(), b.clone()]
+    const geometry = new THREE.BufferGeometry().setFromPoints(points)
+    const material = new THREE.LineDashedMaterial({
+      color: lineColor,
+      dashSize: 0.7,
+      gapSize: 0.35,
+      linewidth: 2,
+    })
+    const line = new THREE.Line(geometry, material)
+    line.computeLineDistances()
+    group.add(line)
+  }
+
+  // Midpoint label sphere for distance (2-residue case)
+  if (centers.length === 2) {
+    const midpoint = centers[0].clone().add(centers[1]).multiplyScalar(0.5)
+    const labelSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.9 })
+    )
+    labelSphere.position.copy(midpoint)
+    group.add(labelSphere)
+  }
+
+  // Center vertex sphere for angle (3-residue case)
+  if (centers.length === 3) {
+    const pivot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 })
+    )
+    pivot.position.copy(centers[1])
+    group.add(pivot)
+  }
+}
+
 function buildMolecule(
   model: ParseResult,
   mode: RenderMode,
@@ -577,6 +678,8 @@ function buildMolecule(
     })
   } else if (mode === 'sphere') {
     createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, false)
+  } else if (mode === 'surface') {
+    createSpacefillRepresentation(group, visibleAtoms, visibleResidues, model, heatmap, colorByChain, selectedKeys)
   } else {
     createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, true)
   }
@@ -591,6 +694,11 @@ function buildMolecule(
     ring.position.copy(center)
     ring.rotation.x = Math.PI / 2
     group.add(ring)
+  }
+
+  // Add 3D measurement lines for distance (2 selected) or angle (3 selected)
+  if (selectedResidues.length === 2 || selectedResidues.length === 3) {
+    addMeasurementLines(group, selectedResidues, residueCenters)
   }
 
   return { group, residueCenters }
@@ -751,6 +859,17 @@ export default function ProteinViewer3D({
       }
     }
 
+    // Cα–Cα–Cα angle when exactly 3 residues are selected
+    let tripletsAngleDeg: number | null = null
+    if (selectedResidueDetails.length === 3) {
+      const [a, b, c] = selectedResidueDetails.map((item) => item.center.clone())
+      const vAB = new THREE.Vector3().subVectors(a, b)
+      const vCB = new THREE.Vector3().subVectors(c, b)
+      if (vAB.lengthSq() > 0 && vCB.lengthSq() > 0) {
+        tripletsAngleDeg = THREE.MathUtils.radToDeg(vAB.angleTo(vCB))
+      }
+    }
+
     return {
       count: selectedResidueDetails.length,
       primary: selectedResidueDetails[selectedResidueDetails.length - 1],
@@ -759,6 +878,7 @@ export default function ProteinViewer3D({
         selectedResidueDetails.reduce((sum, item) => sum + item.avgBFactor, 0) /
         selectedResidueDetails.length,
       maxDistance,
+      tripletsAngleDeg,
     }
   }, [selectedResidueDetails])
 
@@ -817,6 +937,21 @@ export default function ProteinViewer3D({
       farthestPair,
     }
   }, [selectedResidueDetails])
+
+  // Count neighbors of primary selected residue within neighborRadiusAngstrom
+  const primaryNeighborCount = useMemo(() => {
+    if (!selectionSummary) return null
+    const primaryCenter = selectionSummary.primary.center
+    let count = 0
+    for (const residue of parsed.residues) {
+      const center = residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center
+      if (center.distanceTo(primaryCenter) <= neighborRadiusAngstrom) {
+        count += 1
+      }
+    }
+    // Subtract 1 to exclude the primary itself
+    return Math.max(0, count - 1)
+  }, [selectionSummary, parsed.residues, neighborRadiusAngstrom])
 
   const parsedVariantPositions = useMemo(() => {
     const nums = positionsText
@@ -1892,6 +2027,7 @@ export default function ProteinViewer3D({
                 ['cartoon', 'Cartoon'],
                 ['sphere', 'Ball & Stick'],
                 ['stick', 'Stick'],
+                ['surface', 'Spacefill'],
               ] as Array<[RenderMode, string]>).map(([mode, label]) => (
                 <button
                   key={mode}
@@ -2028,58 +2164,66 @@ export default function ProteinViewer3D({
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                     Secondary structure
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
-                      Helix {secondaryStructureComposition.helix}%
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
-                      Sheet {secondaryStructureComposition.sheet}%
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />
-                      Turn {secondaryStructureComposition.turn}%
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
-                      Coil {secondaryStructureComposition.coil}%
-                    </span>
+                  {visibleResidues.filter((r) => r.caAtom).length < 5 ? (
+                    <span className="text-[11px] italic text-slate-500">too few residues</span>
+                  ) : (
+                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
+                        Helix {secondaryStructureComposition.helix}%
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
+                        Sheet {secondaryStructureComposition.sheet}%
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />
+                        Turn {secondaryStructureComposition.turn}%
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
+                        Coil {secondaryStructureComposition.coil}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {visibleResidues.filter((r) => r.caAtom).length >= 5 ? (
+                  <div className="mt-2 flex h-3 w-full overflow-hidden rounded-full">
+                    {secondaryStructureComposition.helix > 0 && (
+                      <div
+                        data-testid="viewer-ss-helix-bar"
+                        className="bg-rose-400"
+                        style={{ width: `${secondaryStructureComposition.helix}%` }}
+                        title={`Helix ${secondaryStructureComposition.helix}%`}
+                      />
+                    )}
+                    {secondaryStructureComposition.sheet > 0 && (
+                      <div
+                        data-testid="viewer-ss-sheet-bar"
+                        className="bg-yellow-400"
+                        style={{ width: `${secondaryStructureComposition.sheet}%` }}
+                        title={`Sheet ${secondaryStructureComposition.sheet}%`}
+                      />
+                    )}
+                    {secondaryStructureComposition.turn > 0 && (
+                      <div
+                        data-testid="viewer-ss-turn-bar"
+                        className="bg-cyan-400"
+                        style={{ width: `${secondaryStructureComposition.turn}%` }}
+                        title={`Turn ${secondaryStructureComposition.turn}%`}
+                      />
+                    )}
+                    {secondaryStructureComposition.coil > 0 && (
+                      <div
+                        data-testid="viewer-ss-coil-bar"
+                        className="flex-1 bg-slate-600"
+                        title={`Coil ${secondaryStructureComposition.coil}%`}
+                      />
+                    )}
                   </div>
-                </div>
-                <div className="mt-2 flex h-3 w-full overflow-hidden rounded-full">
-                  {secondaryStructureComposition.helix > 0 && (
-                    <div
-                      data-testid="viewer-ss-helix-bar"
-                      className="bg-rose-400"
-                      style={{ width: `${secondaryStructureComposition.helix}%` }}
-                      title={`Helix ${secondaryStructureComposition.helix}%`}
-                    />
-                  )}
-                  {secondaryStructureComposition.sheet > 0 && (
-                    <div
-                      data-testid="viewer-ss-sheet-bar"
-                      className="bg-yellow-400"
-                      style={{ width: `${secondaryStructureComposition.sheet}%` }}
-                      title={`Sheet ${secondaryStructureComposition.sheet}%`}
-                    />
-                  )}
-                  {secondaryStructureComposition.turn > 0 && (
-                    <div
-                      data-testid="viewer-ss-turn-bar"
-                      className="bg-cyan-400"
-                      style={{ width: `${secondaryStructureComposition.turn}%` }}
-                      title={`Turn ${secondaryStructureComposition.turn}%`}
-                    />
-                  )}
-                  {secondaryStructureComposition.coil > 0 && (
-                    <div
-                      data-testid="viewer-ss-coil-bar"
-                      className="flex-1 bg-slate-600"
-                      title={`Coil ${secondaryStructureComposition.coil}%`}
-                    />
-                  )}
-                </div>
+                ) : (
+                  <div className="mt-2 h-3 w-full rounded-full bg-white/5" />
+                )}
               </div>
             )}
 
@@ -2159,6 +2303,31 @@ export default function ProteinViewer3D({
                       </div>
                       <div className="mt-1 text-xs text-amber-100/75">
                         Cα–Cα span between the two selected residues
+                      </div>
+                    </div>
+                  )}
+                  {selectionSummary.count === 3 && selectionSummary.tripletsAngleDeg !== null && (
+                    <div
+                      data-testid="viewer-angle-card"
+                      className="rounded-2xl border border-sky-400/25 bg-sky-400/10 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-100">
+                          Angle measurement
+                        </div>
+                        <span className="rounded-full border border-sky-300/20 bg-sky-300/10 px-2.5 py-1 text-[11px] font-medium text-sky-50">
+                          3 residues
+                        </span>
+                      </div>
+                      <div
+                        data-testid="viewer-angle-value"
+                        className="mt-2 text-2xl font-bold tabular-nums text-white"
+                      >
+                        {selectionSummary.tripletsAngleDeg.toFixed(1)}
+                        <span className="ml-1 text-base font-normal text-sky-100">°</span>
+                      </div>
+                      <div className="mt-1 text-xs text-sky-100/75">
+                        Cα–Cα–Cα bond angle at the middle residue
                       </div>
                     </div>
                   )}
@@ -2678,6 +2847,59 @@ export default function ProteinViewer3D({
                       {overlay.label}
                     </div>
                   ))}
+
+                  {/* Distance / angle line overlay when 2 or 3 residues are selected */}
+                  {labelOverlays.length >= 2 && labelOverlays.length <= 3 && (
+                    <svg
+                      data-testid="viewer-measure-overlay"
+                      className="pointer-events-none absolute inset-0 h-full w-full"
+                      style={{ overflow: 'visible' }}
+                    >
+                      {labelOverlays.length === 2 && (
+                        <line
+                          x1={labelOverlays[0].x}
+                          y1={labelOverlays[0].y}
+                          x2={labelOverlays[1].x}
+                          y2={labelOverlays[1].y}
+                          stroke="#f59e0b"
+                          strokeWidth="1.5"
+                          strokeDasharray="5 3"
+                          strokeOpacity="0.75"
+                        />
+                      )}
+                      {labelOverlays.length === 3 && (
+                        <>
+                          <line
+                            x1={labelOverlays[0].x}
+                            y1={labelOverlays[0].y}
+                            x2={labelOverlays[1].x}
+                            y2={labelOverlays[1].y}
+                            stroke="#38bdf8"
+                            strokeWidth="1.5"
+                            strokeDasharray="5 3"
+                            strokeOpacity="0.7"
+                          />
+                          <line
+                            x1={labelOverlays[1].x}
+                            y1={labelOverlays[1].y}
+                            x2={labelOverlays[2].x}
+                            y2={labelOverlays[2].y}
+                            stroke="#38bdf8"
+                            strokeWidth="1.5"
+                            strokeDasharray="5 3"
+                            strokeOpacity="0.7"
+                          />
+                          <circle
+                            cx={labelOverlays[1].x}
+                            cy={labelOverlays[1].y}
+                            r="4"
+                            fill="#38bdf8"
+                            fillOpacity="0.5"
+                          />
+                        </>
+                      )}
+                    </svg>
+                  )}
                 </div>
               )}
             </div>
@@ -3006,6 +3228,20 @@ export default function ProteinViewer3D({
                           : 'Select 2+ residues'
                       }
                     />
+                    {primaryNeighborCount !== null && (
+                      <InspectorStat
+                        label={`Neighbors (≤${formatAngstrom(neighborRadiusAngstrom)} Å)`}
+                        value={String(primaryNeighborCount)}
+                        testId="viewer-inspector-neighbor-count"
+                      />
+                    )}
+                    {selectionSummary.count === 3 && selectionSummary.tripletsAngleDeg !== null && (
+                      <InspectorStat
+                        label="Cα–Cα–Cα angle"
+                        value={`${selectionSummary.tripletsAngleDeg.toFixed(1)}°`}
+                        testId="viewer-inspector-angle"
+                      />
+                    )}
                   </div>
 
                   <p className="text-xs leading-5 text-slate-400">
@@ -3113,6 +3349,10 @@ export default function ProteinViewer3D({
                         ? 'border-amber-400/30 bg-amber-400/15 text-amber-50'
                         : 'border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/10'
                     const aaClass = AA_CLASSES[value.toUpperCase()] || 'bg-slate-600/30 text-slate-200'
+                    const bfSpread = Math.max(parsed.bFactorRange.max - parsed.bFactorRange.min, 1)
+                    const bfNorm = Math.min(1, Math.max(0, (entry.avgBFactor - parsed.bFactorRange.min) / bfSpread))
+                    // Color the B-factor bar: blue (low/ordered) → red (high/disordered)
+                    const bfHue = Math.round((1 - bfNorm) * 220)
 
                     return (
                       <button
@@ -3134,6 +3374,16 @@ export default function ProteinViewer3D({
                           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md text-xs font-bold ${entry.isSelected ? 'bg-white/20 text-white' : aaClass}`}>
                             {value}
                           </span>
+                        </div>
+                        {/* B-factor mini bar */}
+                        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.round(bfNorm * 100)}%`,
+                              background: `hsl(${bfHue},80%,55%)`,
+                            }}
+                          />
                         </div>
                       </button>
                     )

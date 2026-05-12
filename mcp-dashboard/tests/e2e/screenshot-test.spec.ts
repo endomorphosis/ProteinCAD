@@ -134,10 +134,33 @@ test('take after screenshots', async ({ page }) => {
   await page.waitForTimeout(600)
   await page.screenshot({ path: '/tmp/ss-after-selection.png', fullPage: false })
 
-  // Sequence map
+  // Angle measurement card (3-residue selection shows the Cα–Cα–Cα angle)
   try {
+    const angleCard = page.getByTestId('viewer-angle-card')
+    if (await angleCard.isVisible()) {
+      const ab = await angleCard.boundingBox()
+      if (ab && ab.width > 10 && ab.height > 10) {
+        const y = Math.max(0, ab.y - 10)
+        const h = Math.min(ab.height + 20, vp.height - y)
+        if (h > 0) {
+          await page.screenshot({
+            path: '/tmp/ss-after-angle-card.png',
+            clip: { x: 0, y, width: vp.width, height: h },
+          })
+        }
+      }
+    }
+  } catch { /* ok */ }
+
+  // Sequence map with B-factor sparkline bars
+  try {
+    // First click a chain-B hotspot so the sequence map populates
+    await page.getByTestId('viewer-chain-hotspots-B').click()
+    await page.waitForTimeout(500)
     const seqMap = page.getByTestId('viewer-sequence-map')
     if (await seqMap.isVisible()) {
+      await seqMap.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(200)
       const sm = await seqMap.boundingBox()
       if (sm && sm.width > 10 && sm.height > 10) {
         const y = Math.max(0, sm.y)
@@ -150,5 +173,49 @@ test('take after screenshots', async ({ page }) => {
         }
       }
     }
+  } catch { /* ok */ }
+
+  // Measure overlay SVG (select 2 residues then scroll 3D canvas into view)
+  try {
+    await page.getByTestId('viewer-chain-hotspots-B').click()
+    await page.waitForTimeout(300)
+    // Remove one residue to get exactly 2 selected → distance line should appear
+    const chips = page.locator('[data-testid^="viewer-selection-spotlight-chip-"]')
+    const chipCount = await chips.count()
+    if (chipCount > 2) {
+      await chips.first().click()
+      await page.waitForTimeout(300)
+    }
+    const overlay = page.getByTestId('viewer-measure-overlay')
+    if (await overlay.isVisible()) {
+      await page.screenshot({ path: '/tmp/ss-after-measure-overlay.png', fullPage: false })
+    }
+  } catch { /* ok */ }
+
+  // Spacefill (surface) render mode
+  try {
+    await page.getByTestId('viewer-selection-spotlight-clear').click().catch(() => {})
+    await page.getByRole('button', { name: 'Spacefill', exact: true }).click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: '/tmp/ss-after-spacefill.png', fullPage: false })
+    // Switch back to ribbon
+    await page.getByRole('button', { name: 'Ribbon', exact: true }).click()
+    await page.waitForTimeout(400)
+  } catch { /* ok */ }
+
+  // Cartoon mode
+  try {
+    await page.getByRole('button', { name: 'Cartoon', exact: true }).click()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: '/tmp/ss-after-cartoon.png', fullPage: false })
+    await page.getByRole('button', { name: 'Ribbon', exact: true }).click()
+    await page.waitForTimeout(300)
+  } catch { /* ok */ }
+
+  // 3D distance measurement lines (2-residue selection)
+  try {
+    await page.getByTestId('viewer-hotspots-3').click()
+    await page.waitForTimeout(800)
+    await page.screenshot({ path: '/tmp/ss-after-3d-with-selection.png', fullPage: false })
   } catch { /* ok */ }
 })
