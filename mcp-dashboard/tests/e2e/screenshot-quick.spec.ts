@@ -53,7 +53,7 @@ test('take screenshots', async ({ page }) => {
   }))
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('http://localhost:3737/')
+  await page.goto('/')
   await page.waitForTimeout(2000)
   await page.screenshot({ path: '/tmp/ss1-dashboard.png', fullPage: false })
 
@@ -96,6 +96,18 @@ test('take screenshots', async ({ page }) => {
     // Restore
     await page.getByTestId('viewer-fullscreen').click()
     await page.waitForTimeout(400)
+  } catch(e) {}
+
+  // Toggle chain colors + labels to capture style states
+  try {
+    await page.getByTestId('viewer-color-by-chain').click()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: '/tmp/ss5b-chain-colors-off.png', fullPage: false })
+    await page.getByTestId('viewer-show-labels').click()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: '/tmp/ss5c-labels-off.png', fullPage: false })
+    await page.getByTestId('viewer-show-labels').click()
+    await page.getByTestId('viewer-color-by-chain').click()
   } catch(e) {}
 
   // Close viewer

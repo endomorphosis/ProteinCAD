@@ -286,9 +286,11 @@ export default function BackendSettings() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center rounded-md bg-white/90 px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-white dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-700"
+        data-testid="open-backend-settings"
+        className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-400/10 px-3.5 py-2 text-sm font-semibold text-cyan-50 shadow-sm shadow-cyan-900/30 transition hover:bg-cyan-400/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
         title={title}
       >
+        <span aria-hidden="true">⚙️</span>
         Settings
       </button>
 
