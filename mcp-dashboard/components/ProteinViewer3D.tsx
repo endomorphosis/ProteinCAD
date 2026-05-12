@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -48,6 +48,12 @@ type Segment = {
 }
 
 type ResidueSelection = { chain: string; residueNum: number; residue: string }
+type ResidueDetail = ResidueSelection & {
+  atomCount: number
+  avgBFactor: number
+  sequenceResidue?: string
+  center: THREE.Vector3
+}
 type ChainSummary = {
   chain: string
   residueCount: number
@@ -667,6 +673,7 @@ export default function ProteinViewer3D({
   const variantSectionRef = useRef<HTMLElement | null>(null)
   const variantResultsRef = useRef<HTMLElement | null>(null)
   const focusResidueInputRef = useRef<HTMLInputElement | null>(null)
+  const hoverClearTimeoutRef = useRef<number | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
@@ -683,7 +690,18 @@ export default function ProteinViewer3D({
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [autoRotate, setAutoRotate] = useState(false)
   const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS)
-  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; label: string; bFactor: string } | null>(null)
+  const [hoverInfo, setHoverInfo] = useState<{
+    x: number
+    y: number
+    label: string
+    chain: string
+    residueNum: number
+    residue: string
+    atomName?: string
+    atomCount: number
+    avgBFactor: number
+    sequenceResidue?: string
+  } | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [labelOverlays, setLabelOverlays] = useState<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
   const labelOverlaysRef = useRef<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
@@ -692,35 +710,31 @@ export default function ProteinViewer3D({
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
+  const residueDetailsMap = useMemo(() => {
+    const map = new Map<string, ResidueDetail>()
+    parsed.residues.forEach((residue) => {
+      map.set(residue.key, {
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+        atomCount: residue.atoms.length,
+        avgBFactor: residue.avgBFactor,
+        sequenceResidue:
+          sequence && residue.residueNum >= 1 && residue.residueNum <= sequence.length
+            ? sequence[residue.residueNum - 1]
+            : undefined,
+        center: residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center.clone(),
+      })
+    })
+    return map
+  }, [parsed.residues, sequence])
+
   const selectedResidueDetails = useMemo(
     () =>
       selectedResidues
-        .map((selection) => {
-          const residue = parsed.residues.find(
-            (item) => item.chain === selection.chain && item.residueNum === selection.residueNum
-          )
-          if (!residue) return null
-
-          return {
-            ...selection,
-            atomCount: residue.atoms.length,
-            avgBFactor: residue.avgBFactor,
-            sequenceResidue:
-              sequence && selection.residueNum >= 1 && selection.residueNum <= sequence.length
-                ? sequence[selection.residueNum - 1]
-                : undefined,
-            center: residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center.clone(),
-          }
-        })
-        .filter(Boolean) as Array<
-        ResidueSelection & {
-          atomCount: number
-          avgBFactor: number
-          sequenceResidue?: string
-          center: THREE.Vector3
-        }
-      >,
-    [parsed.residues, selectedResidues, sequence]
+        .map((selection) => residueDetailsMap.get(residueKey(selection.chain, selection.residueNum)) || null)
+        .filter(Boolean) as ResidueDetail[],
+    [residueDetailsMap, selectedResidues]
   )
 
   const selectionSummary = useMemo(() => {
@@ -1019,6 +1033,43 @@ export default function ProteinViewer3D({
       setAnalysisMessage(message)
     }
   }
+
+  const cancelHoverClear = useCallback(() => {
+    if (hoverClearTimeoutRef.current) {
+      window.clearTimeout(hoverClearTimeoutRef.current)
+      hoverClearTimeoutRef.current = null
+    }
+  }, [])
+
+  const scheduleHoverClear = useCallback((delay = 140) => {
+    cancelHoverClear()
+    hoverClearTimeoutRef.current = window.setTimeout(() => {
+      setHoverInfo(null)
+      hoverClearTimeoutRef.current = null
+    }, delay)
+  }, [cancelHoverClear])
+
+  const toggleResidueSelection = useCallback((selection: ResidueSelection, options?: { silent?: boolean }) => {
+    let isSelected = false
+    setSelectedResidues((prev) => {
+      isSelected = prev.some((item) => item.chain === selection.chain && item.residueNum === selection.residueNum)
+      const next = isSelected
+        ? prev.filter((item) => !(item.chain === selection.chain && item.residueNum === selection.residueNum))
+        : [...prev, selection]
+      syncPositionsFromSelection(next)
+      return next
+    })
+
+    if (!options?.silent) {
+      setAnalysisMessage(
+        isSelected
+          ? `Removed residue ${selection.chain}:${selection.residueNum} from the active selection.`
+          : `Added residue ${selection.chain}:${selection.residueNum} to the active selection.`
+      )
+    }
+
+    return !isSelected
+  }, [])
 
   const selectHotspots = (limit: number, chainOverride?: string) => {
     const effectiveChain = chainOverride || selectedChain
@@ -1347,6 +1398,34 @@ export default function ProteinViewer3D({
     focusSelectionEntry(selection)
   }
 
+  const focusHoveredResidue = () => {
+    if (!hoverInfo) {
+      setAnalysisMessage('Hover over a residue to focus it.')
+      return
+    }
+
+    const selection = {
+      chain: hoverInfo.chain,
+      residueNum: hoverInfo.residueNum,
+      residue: hoverInfo.residue,
+    }
+
+    selectSingleResidue(selection)
+  }
+
+  const toggleHoveredResidue = () => {
+    if (!hoverInfo) {
+      setAnalysisMessage('Hover over a residue to add it to the selection.')
+      return
+    }
+
+    toggleResidueSelection({
+      chain: hoverInfo.chain,
+      residueNum: hoverInfo.residueNum,
+      residue: hoverInfo.residue,
+    })
+  }
+
   const downloadSnapshot = async () => {
     const renderer = rendererRef.current
     if (!renderer) {
@@ -1625,23 +1704,13 @@ export default function ProteinViewer3D({
           residue: String(data.residue || 'UNK'),
         }
 
-        setSelectedResidues((prev) => {
-          const exists = prev.some(
-            (item) => item.chain === selection.chain && item.residueNum === selection.residueNum
-          )
-          const next = exists
-            ? prev.filter(
-                (item) => !(item.chain === selection.chain && item.residueNum === selection.residueNum)
-              )
-            : [...prev, selection]
-          syncPositionsFromSelection(next)
-          return next
-        })
+        toggleResidueSelection(selection, { silent: true })
       }
       renderer.domElement.addEventListener('click', handleClick)
 
       const handleMouseMove = (event: MouseEvent) => {
         if (!cameraRef.current || !sceneRef.current || !rendererRef.current) return
+        cancelHoverClear()
         const rect = renderer.domElement.getBoundingClientRect()
         pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
         pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
@@ -1653,18 +1722,26 @@ export default function ProteinViewer3D({
         const data = hit?.object.userData
         if (data?.residueNum) {
           const atomName = typeof data.atomName === 'string' ? ` (${data.atomName})` : ''
+          const detail =
+            residueDetailsMap.get(residueKey(String(data.chain || 'A'), Number(data.residueNum))) || null
           setHoverInfo({
             x: event.clientX - rect.left,
             y: event.clientY - rect.top,
             label: `${data.chain}:${data.residueNum} ${data.residue}${atomName}`,
-            bFactor: '',
+            chain: String(data.chain || 'A'),
+            residueNum: Number(data.residueNum),
+            residue: String(data.residue || 'UNK'),
+            atomName: typeof data.atomName === 'string' ? data.atomName : undefined,
+            atomCount: detail?.atomCount || 0,
+            avgBFactor: detail?.avgBFactor || 0,
+            sequenceResidue: detail?.sequenceResidue,
           })
         } else {
           setHoverInfo(null)
         }
       }
       renderer.domElement.addEventListener('mousemove', handleMouseMove)
-      renderer.domElement.addEventListener('mouseleave', () => setHoverInfo(null))
+      renderer.domElement.addEventListener('mouseleave', () => scheduleHoverClear())
 
       const handleResize = () => {
         const currentContainer = containerRef.current
@@ -1726,6 +1803,7 @@ export default function ProteinViewer3D({
 
       return () => {
         window.removeEventListener('resize', handleResize)
+        cancelHoverClear()
         renderer.domElement.removeEventListener('click', handleClick)
         renderer.domElement.removeEventListener('mousemove', handleMouseMove)
         if (frameRef.current) {
@@ -1741,11 +1819,29 @@ export default function ProteinViewer3D({
     } catch (err) {
       setError(`Failed to render 3D structure: ${String(err)}`)
     }
-  }, [onClose, parsed, renderMode, colorByChain, selectedChain, selectedResidues, showHeatmap])
+  }, [
+    onClose,
+    parsed,
+    renderMode,
+    colorByChain,
+    selectedChain,
+    selectedResidues,
+    showHeatmap,
+    residueDetailsMap,
+    toggleResidueSelection,
+    cancelHoverClear,
+    scheduleHoverClear,
+  ])
 
   const clearSelection = () => {
     applySelection([], 'Cleared the current residue selection.')
   }
+
+  const isHoveredResidueSelected = hoverInfo
+    ? selectedResidues.some(
+        (item) => item.chain === hoverInfo.chain && item.residueNum === hoverInfo.residueNum
+      )
+    : false
 
   const residueStats = {
     atoms: parsed.atoms.length,
@@ -2500,6 +2596,68 @@ export default function ProteinViewer3D({
                       style={{ left: hoverInfo.x + 12, top: hoverInfo.y - 10 }}
                     >
                       {hoverInfo.label}
+                    </div>
+                  )}
+
+                  {hoverInfo && (
+                    <div
+                      data-testid="viewer-hover-spotlight"
+                      onMouseEnter={cancelHoverClear}
+                      onMouseLeave={() => setHoverInfo(null)}
+                      className="absolute right-4 top-4 z-10 w-64 rounded-2xl border border-cyan-400/20 bg-slate-950/90 p-4 shadow-lg shadow-slate-950/30 backdrop-blur-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200">
+                            Hover spotlight
+                          </div>
+                          <div data-testid="viewer-hover-spotlight-label" className="mt-1 text-sm font-semibold text-white">
+                            {hoverInfo.label}
+                          </div>
+                        </div>
+                        <div className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-medium text-slate-300">
+                          {hoverInfo.atomCount} atoms
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Avg B-factor</div>
+                          <div data-testid="viewer-hover-spotlight-bfactor" className="mt-1 font-semibold text-white">
+                            {hoverInfo.avgBFactor.toFixed(1)}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500">Sequence</div>
+                          <div data-testid="viewer-hover-spotlight-sequence" className="mt-1 font-semibold text-white">
+                            {hoverInfo.sequenceResidue || 'n/a'}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-slate-400">
+                        Hover reveals residue context before you commit it to the active structural analysis set.
+                      </p>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          data-testid="viewer-hover-spotlight-toggle"
+                          onClick={toggleHoveredResidue}
+                          className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                            isHoveredResidueSelected
+                              ? 'border border-rose-400/30 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20'
+                              : 'bg-cyan-400 text-slate-950 hover:bg-cyan-300'
+                          }`}
+                        >
+                          {isHoveredResidueSelected ? 'Remove from selection' : 'Add to selection'}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="viewer-hover-spotlight-focus"
+                          onClick={focusHoveredResidue}
+                          className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
+                        >
+                          Focus residue
+                        </button>
+                      </div>
                     </div>
                   )}
 

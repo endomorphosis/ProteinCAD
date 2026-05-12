@@ -81,6 +81,31 @@ async function openCompletedJob(page: Page) {
   await page.getByTestId('job-card-job_completed_0').click()
 }
 
+async function revealHoverSpotlight(page: Page) {
+  const canvas = page.locator('canvas').first()
+  await expect(canvas).toBeVisible()
+  const box = await canvas.boundingBox()
+  if (!box) {
+    throw new Error('3D canvas was not available for hover interaction')
+  }
+
+  const hoverSpotlight = page.getByTestId('viewer-hover-spotlight')
+  const xSteps = [0.35, 0.5, 0.65, 0.42, 0.58]
+  const ySteps = [0.28, 0.4, 0.5, 0.62]
+
+  for (const xFactor of xSteps) {
+    for (const yFactor of ySteps) {
+      await page.mouse.move(box.x + box.width * xFactor, box.y + box.height * yFactor, { steps: 8 })
+      await page.waitForTimeout(80)
+      if (await hoverSpotlight.isVisible()) {
+        return
+      }
+    }
+  }
+
+  throw new Error('Unable to reveal hover spotlight in the 3D viewer')
+}
+
 test.describe('Results viewer', () => {
   test.beforeEach(async ({ page }) => {
     await installMockEventSource(page)
@@ -402,6 +427,29 @@ test.describe('Results viewer', () => {
 
     await page.getByTestId('viewer-chain-solo-B').click()
     await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('all')
+  })
+
+  test('3D viewer hover spotlight supports quick residue analysis actions', async ({ page }) => {
+    const job = makeCompletedJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    await revealHoverSpotlight(page)
+    await expect(page.getByTestId('viewer-hover-spotlight')).toBeVisible()
+    await expect(page.getByTestId('viewer-hover-spotlight-bfactor')).not.toHaveText('')
+    await expect(page.getByTestId('viewer-hover-spotlight-sequence')).not.toHaveText('')
+
+    const hoverLabel = ((await page.getByTestId('viewer-hover-spotlight-label').textContent()) || '').trim()
+    const normalizedLabel = hoverLabel.split(' ').slice(0, 2).join(' ')
+
+    await page.getByTestId('viewer-hover-spotlight-toggle').click()
+    await expect(page.getByText(/Added residue .* to the active selection/i)).toBeVisible()
+    await expect(page.getByText(`${normalizedLabel} ×`)).toBeVisible()
   })
 
   test('3D viewer sequence map focuses residues and stacks cleanly on mobile', async ({ page }) => {

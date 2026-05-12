@@ -1,4 +1,4 @@
-import { test } from '@playwright/test'
+import { test, type Page } from '@playwright/test'
 
 const PDB = `ATOM      1  N   ALA A   1      10.000  12.000   2.100  1.00 12.00           N
 ATOM      2  CA  ALA A   1      11.400  12.400   2.100  1.00 12.00           C
@@ -36,6 +36,26 @@ const JOB = {
   error: null,
 }
 
+async function revealHoverSpotlight(page: Page) {
+  const canvas = page.locator('canvas').first()
+  const box = await canvas.boundingBox()
+  if (!box) return false
+
+  const hoverSpotlight = page.getByTestId('viewer-hover-spotlight')
+  const xSteps = [0.28, 0.35, 0.42, 0.5, 0.58, 0.65, 0.72]
+  const ySteps = [0.24, 0.32, 0.4, 0.5, 0.6, 0.68]
+
+  for (const xFactor of xSteps) {
+    for (const yFactor of ySteps) {
+      await page.mouse.move(box.x + box.width * xFactor, box.y + box.height * yFactor, { steps: 8 })
+      await page.waitForTimeout(80)
+      if (await hoverSpotlight.isVisible()) return true
+    }
+  }
+
+  return false
+}
+
 test('take after screenshots', async ({ page }) => {
   await page.route('**/api/mcp/services/status', r => r.fulfill({
     status: 200, contentType: 'application/json',
@@ -59,6 +79,14 @@ test('take after screenshots', async ({ page }) => {
   await page.getByRole('button', { name: /View Target in 3D/i }).click()
   await page.waitForTimeout(2000)
   await page.screenshot({ path: '/tmp/ss-after-3d.png', fullPage: false })
+
+  // Hover spotlight state
+  try {
+    if (await revealHoverSpotlight(page)) {
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: '/tmp/ss-after-hover-spotlight.png', fullPage: false })
+    }
+  } catch { /* ok */ }
 
   // Sidebar full viewport height
   const aside = page.locator('aside').first()
