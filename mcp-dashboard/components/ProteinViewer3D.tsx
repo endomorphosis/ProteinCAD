@@ -1896,9 +1896,13 @@ export default function ProteinViewer3D({
                 {isFullscreen ? '⊡ Restore' : '⊠ Expand'}
               </button>
 
-              <div className="ml-auto hidden shrink-0 text-xs text-slate-400 xl:block">
-                Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap
-              </div>
+            </div>
+
+            <div
+              data-testid="viewer-shortcut-hints"
+              className="border-b border-white/10 px-4 pb-3 text-xs text-slate-400"
+            >
+              Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
