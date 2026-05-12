@@ -468,15 +468,62 @@ test.describe('Results viewer', () => {
     await page.getByRole('button', { name: /View Target in 3D/i }).click()
     await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
 
+    const toolbar = page.getByTestId('viewer-controls-toolbar')
     const buttonTops = await Promise.all(
       ['Ribbon', 'Cartoon', 'Ball & Stick', 'Stick', 'B-factor heatmap', 'Reset view', 'Center selection', 'Auto-rotate off', 'Save PNG'].map(
         async (name) => {
-          const box = await page.getByRole('button', { name, exact: true }).boundingBox()
+          const box = await toolbar.getByRole('button', { name, exact: true }).boundingBox()
           return Math.round(box?.y || 0)
         }
       )
     )
 
     expect(new Set(buttonTops).size).toBe(1)
+  })
+
+  test('3D viewer heatmap legend, PDB download, distance card, and selection helpers', async ({ page }) => {
+    const job = makeAnalysisJob()
+    await installCompletedJobRoutes(page, job)
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await page.getByRole('button', { name: /View Target in 3D/i }).click()
+    await expect(page.getByText('🔬 3D Protein Structure Viewer')).toBeVisible()
+
+    // Heatmap legend appears when heatmap is on, hidden when off
+    await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
+    await page.getByRole('button', { name: 'B-factor heatmap', exact: true }).click()
+    await expect(page.getByTestId('viewer-heatmap-legend')).toBeVisible()
+    await expect(page.getByTestId('viewer-heatmap-legend')).toContainText('B-factor scale')
+    await page.getByRole('button', { name: 'B-factor heatmap', exact: true }).click()
+    await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
+
+    // Download PDB button triggers a download
+    const pdbDownload = page.waitForEvent('download')
+    await page.getByTestId('viewer-download-pdb').click()
+    const pdbFile = await pdbDownload
+    expect(pdbFile.suggestedFilename()).toMatch(/\.pdb$/)
+
+    // Select all & invert selection helpers
+    await page.getByTestId('viewer-select-all').click()
+    await expect(page.getByText(/Selected all 4 visible residues/i)).toBeVisible()
+    await page.getByTestId('viewer-invert-selection').click()
+    await expect(page.getByText(/Nothing left after inverting/i)).toBeVisible()
+
+    // Distance card appears for exactly 2 residues
+    await page.getByTestId('viewer-chain-hotspots-B').click()
+    // B chain has 2 residues → exactly 2 selected → distance card should appear
+    await expect(page.getByTestId('viewer-distance-card')).toBeVisible()
+    await expect(page.getByTestId('viewer-distance-value')).toContainText('Å')
+
+    // Copy button in distance card works
+    await page.getByTestId('viewer-distance-copy').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/Å/)
+
+    // Add a third residue → distance card should disappear (requires > 2 or < 2 residues)
+    // Clear the selection → 0 residues → distance card hidden
+    await page.getByTestId('viewer-selection-spotlight-clear').click()
+    await expect(page.getByTestId('viewer-distance-card')).toBeHidden()
   })
 })

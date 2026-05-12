@@ -629,6 +629,7 @@ export default function ProteinViewer3D({
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
   const [autoRotate, setAutoRotate] = useState(false)
   const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS)
+  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; label: string; bFactor: string } | null>(null)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -1232,6 +1233,56 @@ export default function ProteinViewer3D({
     }
   }
 
+  const downloadPDB = () => {
+    if (!pdbData) {
+      setAnalysisMessage('No PDB data available to download.')
+      return
+    }
+    const baseName = (title || 'structure')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'structure'
+    const filename = `${baseName}.pdb`
+    try {
+      const blob = new Blob([pdbData], { type: 'chemical/x-pdb' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+      setAnalysisMessage(`Saved PDB structure as ${filename}.`)
+    } catch {
+      setAnalysisMessage('Unable to export the PDB structure in this browser context.')
+    }
+  }
+
+  const selectAllResidues = () => {
+    const residues = visibleResidues.map((residue) => ({
+      chain: residue.chain,
+      residueNum: residue.residueNum,
+      residue: residue.residue,
+    }))
+    if (residues.length === 0) {
+      setAnalysisMessage('No residues visible to select.')
+      return
+    }
+    applySelection(residues, `Selected all ${residues.length} visible residue${residues.length === 1 ? '' : 's'}.`)
+  }
+
+  const invertSelection = () => {
+    const selectedSet = new Set(selectedResidues.map((r) => residueKey(r.chain, r.residueNum)))
+    const inverted = visibleResidues
+      .filter((residue) => !selectedSet.has(residue.key))
+      .map((residue) => ({ chain: residue.chain, residueNum: residue.residueNum, residue: residue.residue }))
+    applySelection(
+      inverted,
+      inverted.length === 0
+        ? 'Nothing left after inverting — cleared selection.'
+        : `Inverted selection: ${inverted.length} residue${inverted.length === 1 ? '' : 's'} selected.`
+    )
+  }
+
   const focusOnResidue = () => {
     const query = focusResidue.trim()
     if (!query) {
@@ -1449,6 +1500,32 @@ export default function ProteinViewer3D({
       }
       renderer.domElement.addEventListener('click', handleClick)
 
+      const handleMouseMove = (event: MouseEvent) => {
+        if (!cameraRef.current || !sceneRef.current || !rendererRef.current) return
+        const rect = renderer.domElement.getBoundingClientRect()
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+        pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
+        raycaster.setFromCamera(pointer, cameraRef.current)
+
+        const hit = raycaster
+          .intersectObjects(group.children, true)
+          .find((intersection) => ['residue', 'atom'].includes(String(intersection.object.userData?.kind)))
+        const data = hit?.object.userData
+        if (data?.residueNum) {
+          const atomName = typeof data.atomName === 'string' ? ` (${data.atomName})` : ''
+          setHoverInfo({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            label: `${data.chain}:${data.residueNum} ${data.residue}${atomName}`,
+            bFactor: '',
+          })
+        } else {
+          setHoverInfo(null)
+        }
+      }
+      renderer.domElement.addEventListener('mousemove', handleMouseMove)
+      renderer.domElement.addEventListener('mouseleave', () => setHoverInfo(null))
+
       const handleResize = () => {
         const currentContainer = containerRef.current
         if (!currentContainer || !cameraRef.current || !rendererRef.current) return
@@ -1468,6 +1545,7 @@ export default function ProteinViewer3D({
       return () => {
         window.removeEventListener('resize', handleResize)
         renderer.domElement.removeEventListener('click', handleClick)
+        renderer.domElement.removeEventListener('mousemove', handleMouseMove)
         if (frameRef.current) {
           cancelAnimationFrame(frameRef.current)
           frameRef.current = null
@@ -1597,8 +1675,16 @@ export default function ProteinViewer3D({
                 Save PNG
               </button>
 
+              <button
+                data-testid="viewer-download-pdb"
+                onClick={downloadPDB}
+                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Download PDB
+              </button>
+
               <div className="ml-auto hidden shrink-0 text-xs text-slate-400 xl:block">
-                Rotate: drag · Zoom: scroll · Select: click residues
+                Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue
               </div>
             </div>
 
@@ -1660,6 +1746,37 @@ export default function ProteinViewer3D({
                       testId="viewer-selection-spotlight-range"
                     />
                   </div>
+
+                  {selectionSummary.count === 2 && (
+                    <div
+                      data-testid="viewer-distance-card"
+                      className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+                          Distance measurement
+                        </div>
+                        <button
+                          type="button"
+                          data-testid="viewer-distance-copy"
+                          onClick={copyFarthestPair}
+                          className="rounded-full border border-amber-300/20 bg-amber-300/10 px-2.5 py-1 text-[11px] font-medium text-amber-50 transition hover:bg-amber-300/15"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <div
+                        data-testid="viewer-distance-value"
+                        className="mt-2 text-2xl font-bold tabular-nums text-white"
+                      >
+                        {selectionSummary.maxDistance.toFixed(1)}
+                        <span className="ml-1 text-base font-normal text-amber-100">Å</span>
+                      </div>
+                      <div className="mt-1 text-xs text-amber-100/75">
+                        Cα–Cα span between the two selected residues
+                      </div>
+                    </div>
+                  )}
                   {selectedResidueDetails.length > 1 && (
                     <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2040,7 +2157,43 @@ export default function ProteinViewer3D({
                   </div>
                 </div>
               ) : (
-                <div ref={containerRef} className="h-full w-full" />
+                <div className="relative h-full w-full">
+                  <div ref={containerRef} className="h-full w-full" />
+
+                  {/* B-factor heatmap legend */}
+                  {showHeatmap && (
+                    <div
+                      data-testid="viewer-heatmap-legend"
+                      className="pointer-events-none absolute bottom-4 left-4 rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-xs text-slate-200 backdrop-blur-sm"
+                    >
+                      <div className="mb-1.5 font-semibold uppercase tracking-wide text-slate-400">B-factor scale</div>
+                      <div
+                        className="h-3 w-28 rounded-full"
+                        style={{ background: 'linear-gradient(to right, #3b82f6, #22c55e, #ef4444)' }}
+                      />
+                      <div className="mt-1 flex justify-between font-mono">
+                        <span>{parsed.bFactorRange.min.toFixed(0)}</span>
+                        <span>{parsed.bFactorRange.average.toFixed(0)}</span>
+                        <span>{parsed.bFactorRange.max.toFixed(0)}</span>
+                      </div>
+                      <div className="mt-0.5 flex justify-between text-[10px] text-slate-500">
+                        <span>ordered</span>
+                        <span>disordered</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Hover residue tooltip */}
+                  {hoverInfo && (
+                    <div
+                      data-testid="viewer-hover-tooltip"
+                      className="pointer-events-none absolute z-10 rounded-xl border border-white/10 bg-slate-900/90 px-3 py-1.5 text-xs font-medium text-slate-100 backdrop-blur-sm"
+                      style={{ left: hoverInfo.x + 12, top: hoverInfo.y - 10 }}
+                    >
+                      {hoverInfo.label}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -2107,6 +2260,23 @@ export default function ProteinViewer3D({
                     className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                   >
                     Copy residues
+                  </button>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    data-testid="viewer-select-all"
+                    onClick={selectAllResidues}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    data-testid="viewer-invert-selection"
+                    onClick={invertSelection}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Invert selection
                   </button>
                 </div>
 
