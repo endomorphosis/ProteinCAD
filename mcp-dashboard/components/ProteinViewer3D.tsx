@@ -2017,9 +2017,11 @@ export default function ProteinViewer3D({
                           const positions = new Set(selectedResidues.map((r) => r.residueNum))
                           const fasta = Array.from(positions)
                             .sort((a, b) => a - b)
-                            .map((pos) => (pos >= 1 && pos <= sequence.length ? sequence[pos - 1] : '?'))
+                            .filter((pos) => pos >= 1 && pos <= sequence.length)
+                            .map((pos) => sequence[pos - 1])
                             .join('')
-                          const header = `>Selection_${selectedResidues.length}residues`
+                          if (!fasta) return
+                          const header = `>Selection_${fasta.length}aa`
                           copyTextToClipboard(`${header}\n${fasta}`)
                         }}
                         className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
