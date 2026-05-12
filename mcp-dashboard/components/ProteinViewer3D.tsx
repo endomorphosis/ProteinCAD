@@ -102,6 +102,40 @@ const SECONDARY_COLORS: Record<SecondaryType, number> = {
   coil: 0x94a3b8,
 }
 
+// Distinct chain colors for multi-chain structures
+const CHAIN_PALETTE: number[] = [
+  0x60a5fa, // blue
+  0x34d399, // emerald
+  0xf472b6, // pink
+  0xfbbf24, // amber
+  0xa78bfa, // violet
+  0xfb923c, // orange
+  0x22d3ee, // cyan
+  0x86efac, // green
+  0xfc8181, // rose
+  0xe879f9, // fuchsia
+]
+
+// Amino acid physicochemical class → Tailwind color utility classes
+const AA_CLASSES: Record<string, string> = {
+  // Hydrophobic
+  A: 'bg-slate-500/30 text-slate-100', V: 'bg-slate-500/30 text-slate-100',
+  L: 'bg-slate-500/30 text-slate-100', I: 'bg-slate-500/30 text-slate-100',
+  M: 'bg-slate-500/30 text-slate-100', F: 'bg-slate-600/30 text-slate-100',
+  W: 'bg-slate-600/30 text-slate-100', P: 'bg-slate-400/30 text-slate-100',
+  // Polar uncharged
+  S: 'bg-teal-500/30 text-teal-100', T: 'bg-teal-500/30 text-teal-100',
+  C: 'bg-yellow-500/30 text-yellow-100', Y: 'bg-teal-600/30 text-teal-100',
+  N: 'bg-teal-400/30 text-teal-100', Q: 'bg-teal-400/30 text-teal-100',
+  // Negatively charged
+  D: 'bg-rose-500/30 text-rose-100', E: 'bg-rose-500/30 text-rose-100',
+  // Positively charged
+  K: 'bg-blue-500/30 text-blue-100', R: 'bg-blue-600/30 text-blue-100',
+  H: 'bg-blue-400/30 text-blue-100',
+  // Special
+  G: 'bg-green-500/30 text-green-100',
+}
+
 const DEFAULT_NUM_VARIANTS = 5
 const SPOTLIGHT_NEIGHBOR_RADIUS = 8
 const MIN_SPOTLIGHT_NEIGHBOR_RADIUS = 2
@@ -266,6 +300,11 @@ function getStructureColor(type: SecondaryType, heatmap: boolean, value: number,
   return heatmap ? getBFactorColor(value, model.bFactorRange) : new THREE.Color(SECONDARY_COLORS[type])
 }
 
+function chainPaletteColor(chain: string, allChains: string[]): THREE.Color {
+  const index = allChains.indexOf(chain)
+  return new THREE.Color(CHAIN_PALETTE[index >= 0 ? index % CHAIN_PALETTE.length : 0])
+}
+
 function addHotspot(
   group: THREE.Group,
   residue: ResidueSummary,
@@ -295,7 +334,8 @@ function createRibbonRepresentation(
   residues: ResidueSummary[],
   model: ParseResult,
   heatmap: boolean,
-  selectedKeys: Set<string>
+  selectedKeys: Set<string>,
+  chainColor?: THREE.Color
 ) {
   const caResidues = residues.filter((residue) => residue.caAtom)
   if (caResidues.length < 2) return
@@ -304,7 +344,7 @@ function createRibbonRepresentation(
   const curve = new THREE.CatmullRomCurve3(points)
   const color = heatmap
     ? getBFactorColor(model.bFactorRange.average, model.bFactorRange)
-    : new THREE.Color(0x93c5fd)
+    : chainColor ?? new THREE.Color(0x93c5fd)
   const tube = new THREE.Mesh(
     new THREE.TubeGeometry(curve, Math.max(points.length * 8, 32), 0.4, 14, false),
     new THREE.MeshPhongMaterial({ color, shininess: 45, transparent: true, opacity: 0.94 })
@@ -318,7 +358,9 @@ function createRibbonRepresentation(
       new THREE.MeshPhongMaterial({
         color: selectedKeys.has(residue.key)
           ? 0xf8fafc
-          : getStructureColor('coil', heatmap, residue.avgBFactor, model),
+          : heatmap
+            ? getStructureColor('coil', true, residue.avgBFactor, model)
+            : chainColor ?? getStructureColor('coil', false, residue.avgBFactor, model),
         emissive: selectedKeys.has(residue.key) ? new THREE.Color(0x2563eb) : new THREE.Color(0x000000),
         emissiveIntensity: selectedKeys.has(residue.key) ? 0.45 : 0,
       })
@@ -347,7 +389,8 @@ function createCartoonRepresentation(
   residues: ResidueSummary[],
   model: ParseResult,
   heatmap: boolean,
-  selectedKeys: Set<string>
+  selectedKeys: Set<string>,
+  chainColor?: THREE.Color
 ) {
   const caResidues = residues.filter((residue) => residue.caAtom)
   if (caResidues.length < 2) return
@@ -360,7 +403,9 @@ function createCartoonRepresentation(
     const points = segmentResidues.map((residue) => getAtomPosition(residue.caAtom!))
     const averageB =
       segmentResidues.reduce((sum, residue) => sum + residue.avgBFactor, 0) / segmentResidues.length
-    const color = getStructureColor(segment.type, heatmap, averageB, model)
+    const color = heatmap
+      ? getStructureColor(segment.type, true, averageB, model)
+      : chainColor ?? getStructureColor(segment.type, false, averageB, model)
 
     if (segment.type === 'sheet') {
       const start = points[0]
@@ -488,6 +533,7 @@ function buildMolecule(
   model: ParseResult,
   mode: RenderMode,
   heatmap: boolean,
+  colorByChain: boolean,
   selectedChain: string,
   selectedResidues: ResidueSelection[]
 ): BuildResult {
@@ -514,9 +560,15 @@ function buildMolecule(
   }
 
   if (mode === 'ribbon') {
-    chainGroups.forEach((residues) => createRibbonRepresentation(group, residues, model, heatmap, selectedKeys))
+    chainGroups.forEach((residues, chain) => {
+      const chainColor = (colorByChain && !heatmap) ? chainPaletteColor(chain, model.chains) : undefined
+      createRibbonRepresentation(group, residues, model, heatmap, selectedKeys, chainColor)
+    })
   } else if (mode === 'cartoon') {
-    chainGroups.forEach((residues) => createCartoonRepresentation(group, residues, model, heatmap, selectedKeys))
+    chainGroups.forEach((residues, chain) => {
+      const chainColor = (colorByChain && !heatmap) ? chainPaletteColor(chain, model.chains) : undefined
+      createCartoonRepresentation(group, residues, model, heatmap, selectedKeys, chainColor)
+    })
   } else if (mode === 'sphere') {
     createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, false)
   } else {
@@ -618,6 +670,7 @@ export default function ProteinViewer3D({
   const [error, setError] = useState<string | null>(null)
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
   const [showHeatmap, setShowHeatmap] = useState(false)
+  const [colorByChain, setColorByChain] = useState(true)
   const [selectedResidues, setSelectedResidues] = useState<ResidueSelection[]>([])
   const [positionsText, setPositionsText] = useState('')
   const [numVariants, setNumVariants] = useState(DEFAULT_NUM_VARIANTS)
@@ -820,6 +873,24 @@ export default function ProteinViewer3D({
       isHotspot: hotspotKeys.has(residue.key),
     }))
   }, [hotspotKeys, selectedResidues, sequence, visibleResidues])
+
+  const secondaryStructureComposition = useMemo(() => {
+    const caResidues = visibleResidues.filter((r) => r.caAtom)
+    if (caResidues.length === 0) return null
+    const segments = detectSecondaryStructure(caResidues)
+    const counts: Record<SecondaryType, number> = { helix: 0, sheet: 0, turn: 0, coil: 0 }
+    for (const seg of segments) {
+      const len = seg.end - seg.start + 1
+      counts[seg.type] += len
+    }
+    const total = caResidues.length
+    return {
+      helix: Math.round((counts.helix / total) * 100),
+      sheet: Math.round((counts.sheet / total) * 100),
+      turn: Math.round((counts.turn / total) * 100),
+      coil: Math.round((counts.coil / total) * 100),
+    }
+  }, [visibleResidues])
 
   useEffect(() => {
     setSelectedResidues((prev) => {
@@ -1456,6 +1527,7 @@ export default function ProteinViewer3D({
         parsed,
         renderMode,
         showHeatmap,
+        colorByChain,
         selectedChain,
         selectedResidues
       )
@@ -1559,7 +1631,7 @@ export default function ProteinViewer3D({
     } catch (err) {
       setError(`Failed to render 3D structure: ${String(err)}`)
     }
-  }, [onClose, parsed, renderMode, selectedChain, selectedResidues, showHeatmap])
+  }, [onClose, parsed, renderMode, colorByChain, selectedChain, selectedResidues, showHeatmap])
 
   const clearSelection = () => {
     applySelection([], 'Cleared the current residue selection.')
@@ -1641,6 +1713,19 @@ export default function ProteinViewer3D({
               </button>
 
               <button
+                data-testid="viewer-color-by-chain"
+                onClick={() => setColorByChain((prev) => !prev)}
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                  colorByChain
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title="Toggle chain-based coloring"
+              >
+                Chain colors
+              </button>
+
+              <button
                 onClick={resetView}
                 className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
               >
@@ -1697,6 +1782,70 @@ export default function ProteinViewer3D({
                 value={parsed.bFactorRange.average ? parsed.bFactorRange.average.toFixed(1) : '0.0'}
               />
             </div>
+
+            {secondaryStructureComposition && (
+              <div
+                data-testid="viewer-ss-composition"
+                className="border-b border-white/10 px-4 py-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Secondary structure
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
+                      Helix {secondaryStructureComposition.helix}%
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
+                      Sheet {secondaryStructureComposition.sheet}%
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />
+                      Turn {secondaryStructureComposition.turn}%
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
+                      Coil {secondaryStructureComposition.coil}%
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 flex h-3 w-full overflow-hidden rounded-full">
+                  {secondaryStructureComposition.helix > 0 && (
+                    <div
+                      data-testid="viewer-ss-helix-bar"
+                      className="bg-rose-400"
+                      style={{ width: `${secondaryStructureComposition.helix}%` }}
+                      title={`Helix ${secondaryStructureComposition.helix}%`}
+                    />
+                  )}
+                  {secondaryStructureComposition.sheet > 0 && (
+                    <div
+                      data-testid="viewer-ss-sheet-bar"
+                      className="bg-yellow-400"
+                      style={{ width: `${secondaryStructureComposition.sheet}%` }}
+                      title={`Sheet ${secondaryStructureComposition.sheet}%`}
+                    />
+                  )}
+                  {secondaryStructureComposition.turn > 0 && (
+                    <div
+                      data-testid="viewer-ss-turn-bar"
+                      className="bg-cyan-400"
+                      style={{ width: `${secondaryStructureComposition.turn}%` }}
+                      title={`Turn ${secondaryStructureComposition.turn}%`}
+                    />
+                  )}
+                  {secondaryStructureComposition.coil > 0 && (
+                    <div
+                      data-testid="viewer-ss-coil-bar"
+                      className="flex-1 bg-slate-600"
+                      title={`Coil ${secondaryStructureComposition.coil}%`}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
 
             {selectionSummary && (
               <div
@@ -1860,6 +2009,24 @@ export default function ProteinViewer3D({
                     >
                       Copy residues
                     </button>
+                    {sequence && (
+                      <button
+                        type="button"
+                        data-testid="viewer-selection-spotlight-fasta"
+                        onClick={() => {
+                          const positions = new Set(selectedResidues.map((r) => r.residueNum))
+                          const fasta = Array.from(positions)
+                            .sort((a, b) => a - b)
+                            .map((pos) => (pos >= 1 && pos <= sequence.length ? sequence[pos - 1] : '?'))
+                            .join('')
+                          const header = `>Selection_${selectedResidues.length}residues`
+                          copyTextToClipboard(`${header}\n${fasta}`)
+                        }}
+                        className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
+                      >
+                        Copy FASTA
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-testid="viewer-selection-spotlight-nearby"
@@ -2596,6 +2763,13 @@ export default function ProteinViewer3D({
                     {sequenceMapEntries.length} visible
                   </span>
                 </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                  <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-slate-500/50" />Hydrophobic</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-teal-500/50" />Polar</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-rose-500/50" />Negative</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-blue-500/50" />Positive</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-green-500/50" />Gly</span>
+                </div>
                 <div className="mt-4 max-h-56 overflow-y-auto pr-1">
                   <div className="flex flex-wrap gap-2">
                   {sequenceMapEntries.map((entry) => {
@@ -2606,6 +2780,7 @@ export default function ProteinViewer3D({
                       : entry.isHotspot
                         ? 'border-amber-400/30 bg-amber-400/15 text-amber-50'
                         : 'border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/10'
+                    const aaClass = AA_CLASSES[value.toUpperCase()] || 'bg-slate-600/30 text-slate-200'
 
                     return (
                       <button
@@ -2623,7 +2798,11 @@ export default function ProteinViewer3D({
                         title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}`}
                       >
                         <div className="text-[11px] font-semibold uppercase tracking-wide">{label}</div>
-                        <div className="mt-1 text-sm font-semibold">{value}</div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md text-xs font-bold ${entry.isSelected ? 'bg-white/20 text-white' : aaClass}`}>
+                            {value}
+                          </span>
+                        </div>
                       </button>
                     )
                   })}
@@ -2776,7 +2955,17 @@ export default function ProteinViewer3D({
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Legend</h4>
               <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {renderMode === 'ribbon' || renderMode === 'cartoon' ? (
+                {colorByChain && !showHeatmap && (renderMode === 'ribbon' || renderMode === 'cartoon') ? (
+                  <>
+                    {parsed.chains.map((chain, i) => (
+                      <LegendItem
+                        key={chain}
+                        label={`Chain ${chain}`}
+                        color={new THREE.Color(CHAIN_PALETTE[i % CHAIN_PALETTE.length])}
+                      />
+                    ))}
+                  </>
+                ) : renderMode === 'ribbon' || renderMode === 'cartoon' ? (
                   <>
                     {Object.entries(SECONDARY_COLORS).map(([label, color]) => (
                       <LegendItem key={label} label={label} color={new THREE.Color(color)} />

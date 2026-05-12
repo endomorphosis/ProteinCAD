@@ -36,7 +36,7 @@ const JOB = {
   error: null,
 }
 
-test('take before screenshots', async ({ page }) => {
+test('take after screenshots', async ({ page }) => {
   await page.route('**/api/mcp/services/status', r => r.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ alphafold: { status: 'ready', url: 'x' } })
@@ -50,20 +50,63 @@ test('take before screenshots', async ({ page }) => {
 
   await page.goto('/')
   await page.waitForTimeout(2000)
-  await page.screenshot({ path: '/tmp/ss-before-dashboard.png', fullPage: false })
+  await page.screenshot({ path: '/tmp/ss-after-dashboard.png', fullPage: false })
 
   await page.getByTestId('job-card-job_ss0').click()
   await page.waitForTimeout(800)
-  await page.screenshot({ path: '/tmp/ss-before-job.png', fullPage: false })
+  await page.screenshot({ path: '/tmp/ss-after-job.png', fullPage: false })
 
   await page.getByRole('button', { name: /View Target in 3D/i }).click()
   await page.waitForTimeout(2000)
-  await page.screenshot({ path: '/tmp/ss-before-3d.png', fullPage: false })
+  await page.screenshot({ path: '/tmp/ss-after-3d.png', fullPage: false })
 
-  // Sidebar clip
+  // Sidebar full viewport height
   const aside = page.locator('aside').first()
   const box = await aside.boundingBox()
-  if (box) {
-    await page.screenshot({ path: '/tmp/ss-before-sidebar.png', clip: { x: box.x, y: 0, width: box.width, height: 900 } })
+  const vp = page.viewportSize() || { width: 1440, height: 900 }
+  if (box && box.width > 10) {
+    const x = Math.max(0, box.x)
+    const w = Math.min(box.width, vp.width - x)
+    if (w > 0) {
+      await page.screenshot({
+        path: '/tmp/ss-after-sidebar.png',
+        clip: { x, y: 0, width: w, height: vp.height },
+      })
+    }
   }
+
+  // Toolbar
+  try {
+    const toolbar = page.getByTestId('viewer-controls-toolbar')
+    const tb = await toolbar.boundingBox()
+    if (tb && tb.width > 10) {
+      await page.screenshot({
+        path: '/tmp/ss-after-toolbar.png',
+        clip: { x: 0, y: Math.max(0, tb.y), width: vp.width, height: Math.min(tb.height + 70, vp.height - tb.y) },
+      })
+    }
+  } catch { /* ok */ }
+
+  // Select hotspots to show selection spotlight
+  await page.getByTestId('viewer-hotspots-3').click()
+  await page.waitForTimeout(600)
+  await page.screenshot({ path: '/tmp/ss-after-selection.png', fullPage: false })
+
+  // Sequence map
+  try {
+    const seqMap = page.getByTestId('viewer-sequence-map')
+    if (await seqMap.isVisible()) {
+      const sm = await seqMap.boundingBox()
+      if (sm && sm.width > 10 && sm.height > 10) {
+        const y = Math.max(0, sm.y)
+        const h = Math.min(sm.height, vp.height - y)
+        if (h > 0) {
+          await page.screenshot({
+            path: '/tmp/ss-after-seqmap.png',
+            clip: { x: Math.max(0, sm.x), y, width: Math.min(sm.width, vp.width - sm.x), height: h },
+          })
+        }
+      }
+    }
+  } catch { /* ok */ }
 })
