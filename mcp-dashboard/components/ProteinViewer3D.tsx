@@ -687,6 +687,7 @@ export default function ProteinViewer3D({
   const [labelOverlays, setLabelOverlays] = useState<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
   const labelOverlaysRef = useRef<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
   const [showLabels, setShowLabels] = useState(true)
+  const selectedResiduesRenderRef = useRef<ResidueSelection[]>([])
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -907,10 +908,9 @@ export default function ProteinViewer3D({
     })
   }, [selectedChain])
 
-  // Expose selectedResidues to the animation loop without causing re-render
+  // Keep a ref in sync with selectedResidues for the animation loop (avoids window globals)
   useEffect(() => {
-    ;(window as any).__pv3d_selected = selectedResidues
-    return () => { delete (window as any).__pv3d_selected }
+    selectedResiduesRenderRef.current = selectedResidues
   }, [selectedResidues])
 
   useEffect(() => {
@@ -1624,39 +1624,37 @@ export default function ProteinViewer3D({
 
         // Update residue label overlays for selected residues
         const rect = renderer.domElement.getBoundingClientRect()
-        if (rect.width > 0 && rect.height > 0 && labelOverlaysRef.current !== undefined) {
-          // We'll update labels via a throttled mechanism - skip if no selection
-          const selectedKeys = new Set(
-            (window as any).__pv3d_selected?.map((r: ResidueSelection) =>
-              `${r.chain || '_'}:${r.residueNum}`
-            ) || []
-          )
-          if (selectedKeys.size > 0) {
+        if (rect.width > 0 && rect.height > 0) {
+          const currentSelected = selectedResiduesRenderRef.current
+          if (currentSelected.length > 0) {
             const overlays: typeof labelOverlaysRef.current = []
-            selectedKeys.forEach((keyValue) => {
-              const key = keyValue as string
+            for (const r of currentSelected) {
+              const key = `${r.chain || '_'}:${r.residueNum}`
               const worldPos = residueCenters.get(key)
-              if (!worldPos) return
+              if (!worldPos) continue
               const proj = worldPos.clone().project(camera)
               const x = ((proj.x + 1) / 2) * rect.width
               const y = (-(proj.y - 1) / 2) * rect.height
               if (proj.z < 1) {
-                const parts = key.split(':')
-                const chain = parts[0] === '_' ? '' : parts[0]
-                const num = parts[1]
+                const chain = r.chain || ''
                 overlays.push({
                   key,
                   x,
                   y,
-                  label: chain ? `${chain}:${num}` : num,
+                  label: chain ? `${chain}:${r.residueNum}` : String(r.residueNum),
                   color: chain ? `#${chainPaletteColor(chain, parsed.chains).getHexString()}` : '#60a5fa',
                 })
               }
-            })
-            // Only update state if values changed (compare JSON to avoid excessive re-renders)
-            const next = JSON.stringify(overlays)
-            const prev = JSON.stringify(labelOverlaysRef.current)
-            if (next !== prev) {
+            }
+            // Only trigger setState when content changes (compare by length + first/last key)
+            const prev = labelOverlaysRef.current
+            const changed =
+              overlays.length !== prev.length ||
+              (overlays.length > 0 &&
+                (overlays[0].key !== prev[0].key ||
+                  Math.abs(overlays[0].x - prev[0].x) > 1 ||
+                  Math.abs(overlays[0].y - prev[0].y) > 1))
+            if (changed) {
               labelOverlaysRef.current = overlays
               setLabelOverlays(overlays)
             }
