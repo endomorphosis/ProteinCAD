@@ -666,6 +666,7 @@ export default function ProteinViewer3D({
   const residueInspectorRef = useRef<HTMLElement | null>(null)
   const variantSectionRef = useRef<HTMLElement | null>(null)
   const variantResultsRef = useRef<HTMLElement | null>(null)
+  const focusResidueInputRef = useRef<HTMLInputElement | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
@@ -920,9 +921,58 @@ export default function ProteinViewer3D({
   }, [autoRotate])
 
   useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tagName = target.tagName
+      return (
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        tagName === 'SELECT' ||
+        target.isContentEditable
+      )
     }
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+
+      const typingTarget = isTypingTarget(event.target)
+      if (event.key === '/' && !typingTarget) {
+        event.preventDefault()
+        focusResidueInputRef.current?.focus()
+        focusResidueInputRef.current?.select()
+        setAnalysisMessage('Focused residue search. Type a value like A:42 and press Focus.')
+        return
+      }
+
+      if (typingTarget) return
+
+      switch (event.key.toLowerCase()) {
+        case 'f':
+          setIsFullscreen((prev) => !prev)
+          setAnalysisMessage('Toggled fullscreen mode.')
+          break
+        case 'c':
+          setColorByChain((prev) => !prev)
+          setAnalysisMessage('Toggled chain-based coloring.')
+          break
+        case 'l':
+          setShowLabels((prev) => !prev)
+          setAnalysisMessage('Toggled residue labels.')
+          break
+        case 'h':
+          setShowHeatmap((prev) => !prev)
+          setAnalysisMessage('Toggled B-factor heatmap.')
+          break
+        default:
+          break
+      }
+    }
+
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [onClose])
@@ -1847,7 +1897,7 @@ export default function ProteinViewer3D({
               </button>
 
               <div className="ml-auto hidden shrink-0 text-xs text-slate-400 xl:block">
-                Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue
+                Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap
               </div>
             </div>
 
@@ -2488,6 +2538,7 @@ export default function ProteinViewer3D({
                   Focus residue
                   <div className="mt-2 flex gap-2">
                     <input
+                      ref={focusResidueInputRef}
                       data-testid="viewer-focus-residue"
                       value={focusResidue}
                       onChange={(event) => setFocusResidue(event.target.value)}

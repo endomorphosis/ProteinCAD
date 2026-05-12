@@ -499,6 +499,25 @@ test.describe('Results viewer', () => {
     await page.getByRole('button', { name: 'B-factor heatmap', exact: true }).click()
     await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
 
+    // Keyboard shortcuts toggle key viewer modes and focus the residue input.
+    await page.keyboard.press('h')
+    await expect(page.getByTestId('viewer-heatmap-legend')).toBeVisible()
+    await page.keyboard.press('h')
+    await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
+    await page.keyboard.press('l')
+    await expect(page.getByTestId('viewer-show-labels')).toHaveText(/Labels off/i)
+    await page.keyboard.press('c')
+    await expect(page.getByTestId('viewer-color-by-chain')).toHaveClass(/bg-white\/5/)
+    await page.keyboard.press('/')
+    await expect(page.getByTestId('viewer-focus-residue')).toBeFocused()
+    await page.keyboard.type('B:9')
+    await page.getByTestId('viewer-focus-button').click()
+    await expect(page.getByText(/Focused on residue B:9/i)).toBeVisible()
+    await page.keyboard.press('f')
+    await expect(page.getByTestId('viewer-fullscreen')).toHaveText(/Restore/i)
+    await page.keyboard.press('f')
+    await expect(page.getByTestId('viewer-fullscreen')).toHaveText(/Expand/i)
+
     // Download PDB button triggers a download
     const pdbDownload = page.waitForEvent('download')
     await page.getByTestId('viewer-download-pdb').click()
