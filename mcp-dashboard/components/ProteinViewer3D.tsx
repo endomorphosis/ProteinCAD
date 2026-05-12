@@ -683,6 +683,10 @@ export default function ProteinViewer3D({
   const [autoRotate, setAutoRotate] = useState(false)
   const [neighborRadiusAngstrom, setNeighborRadiusAngstrom] = useState(SPOTLIGHT_NEIGHBOR_RADIUS)
   const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; label: string; bFactor: string } | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [labelOverlays, setLabelOverlays] = useState<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
+  const labelOverlaysRef = useRef<Array<{ key: string; x: number; y: number; label: string; color: string }>>([])
+  const [showLabels, setShowLabels] = useState(true)
 
   const parsed = useMemo(() => parsePDB(pdbData), [pdbData])
 
@@ -902,6 +906,12 @@ export default function ProteinViewer3D({
       return next
     })
   }, [selectedChain])
+
+  // Expose selectedResidues to the animation loop without causing re-render
+  useEffect(() => {
+    ;(window as any).__pv3d_selected = selectedResidues
+    return () => { delete (window as any).__pv3d_selected }
+  }, [selectedResidues])
 
   useEffect(() => {
     if (controlsRef.current) {
@@ -1611,6 +1621,50 @@ export default function ProteinViewer3D({
         frameRef.current = requestAnimationFrame(animate)
         controls.update()
         renderer.render(scene, camera)
+
+        // Update residue label overlays for selected residues
+        const rect = renderer.domElement.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0 && labelOverlaysRef.current !== undefined) {
+          // We'll update labels via a throttled mechanism - skip if no selection
+          const selectedKeys = new Set(
+            (window as any).__pv3d_selected?.map((r: ResidueSelection) =>
+              `${r.chain || '_'}:${r.residueNum}`
+            ) || []
+          )
+          if (selectedKeys.size > 0) {
+            const overlays: typeof labelOverlaysRef.current = []
+            selectedKeys.forEach((keyValue) => {
+              const key = keyValue as string
+              const worldPos = residueCenters.get(key)
+              if (!worldPos) return
+              const proj = worldPos.clone().project(camera)
+              const x = ((proj.x + 1) / 2) * rect.width
+              const y = (-(proj.y - 1) / 2) * rect.height
+              if (proj.z < 1) {
+                const parts = key.split(':')
+                const chain = parts[0] === '_' ? '' : parts[0]
+                const num = parts[1]
+                overlays.push({
+                  key,
+                  x,
+                  y,
+                  label: chain ? `${chain}:${num}` : num,
+                  color: chain ? `#${chainPaletteColor(chain, parsed.chains).getHexString()}` : '#60a5fa',
+                })
+              }
+            })
+            // Only update state if values changed (compare JSON to avoid excessive re-renders)
+            const next = JSON.stringify(overlays)
+            const prev = JSON.stringify(labelOverlaysRef.current)
+            if (next !== prev) {
+              labelOverlaysRef.current = overlays
+              setLabelOverlays(overlays)
+            }
+          } else if (labelOverlaysRef.current.length > 0) {
+            labelOverlaysRef.current = []
+            setLabelOverlays([])
+          }
+        }
       }
       animate()
 
@@ -1675,7 +1729,7 @@ export default function ProteinViewer3D({
           </button>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-y-auto lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className={`flex flex-1 flex-col overflow-y-auto lg:grid lg:overflow-hidden ${isFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_360px]'}`}>
           <div className="min-w-0 border-b border-white/10 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r">
             <div
               data-testid="viewer-controls-toolbar"
@@ -1766,6 +1820,32 @@ export default function ProteinViewer3D({
                 className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
               >
                 Download PDB
+              </button>
+
+              <button
+                data-testid="viewer-show-labels"
+                onClick={() => setShowLabels((prev) => !prev)}
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                  showLabels
+                    ? 'bg-cyan-400/20 text-cyan-100'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title="Toggle residue label overlays"
+              >
+                Labels {showLabels ? 'on' : 'off'}
+              </button>
+
+              <button
+                data-testid="viewer-fullscreen"
+                onClick={() => setIsFullscreen((prev) => !prev)}
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                  isFullscreen
+                    ? 'bg-slate-400 text-slate-950'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title={isFullscreen ? 'Restore split view' : 'Expand 3D canvas'}
+              >
+                {isFullscreen ? '⊡ Restore' : '⊠ Expand'}
               </button>
 
               <div className="ml-auto hidden shrink-0 text-xs text-slate-400 xl:block">
@@ -2317,7 +2397,7 @@ export default function ProteinViewer3D({
               </div>
             )}
 
-            <div className="h-[340px] bg-slate-950/60 sm:h-[420px] lg:min-h-0 lg:flex-1">
+            <div className="h-[460px] bg-slate-950/60 sm:h-[560px] lg:min-h-0 lg:flex-1">
               {error ? (
                 <div className="flex h-full items-center justify-center px-6 text-center">
                   <div>
@@ -2362,12 +2442,30 @@ export default function ProteinViewer3D({
                       {hoverInfo.label}
                     </div>
                   )}
+
+                  {/* Residue label overlays for selected residues */}
+                  {showLabels && labelOverlays.map((overlay) => (
+                    <div
+                      key={overlay.key}
+                      className="pointer-events-none absolute z-10 select-none rounded-full border px-1.5 py-0.5 text-[10px] font-bold backdrop-blur-sm"
+                      style={{
+                        left: overlay.x + 6,
+                        top: overlay.y - 14,
+                        borderColor: overlay.color,
+                        background: `${overlay.color}22`,
+                        color: overlay.color,
+                        textShadow: '0 1px 2px #000',
+                      }}
+                    >
+                      {overlay.label}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </div>
 
-          <aside className="min-w-0 bg-slate-900/95 p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-y-auto">
+          <aside className={`min-w-0 bg-slate-900/95 p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-y-auto ${isFullscreen ? 'hidden' : ''}`}>
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Structure controls</h4>
               <div className="mt-4 space-y-3">
@@ -2415,6 +2513,13 @@ export default function ProteinViewer3D({
                     className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                   >
                     Top 3 hotspots
+                  </button>
+                  <button
+                    data-testid="viewer-hotspots-5"
+                    onClick={() => selectHotspots(5)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    Top 5 hotspots
                   </button>
                   <button
                     data-testid="viewer-copy-positions"

@@ -61,15 +61,41 @@ test('take screenshots', async ({ page }) => {
   await page.waitForTimeout(1000)
   await page.screenshot({ path: '/tmp/ss2-job-selected.png', fullPage: false })
 
+  // Scroll down to see score chart
+  const resultsSection = page.locator('[data-testid="design-score-chart"]')
+  if (await resultsSection.isVisible()) {
+    await resultsSection.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: '/tmp/ss2b-score-chart.png', fullPage: false })
+  }
+
+  // Open 3D viewer
   await page.getByRole('button', { name: /View Target in 3D/i }).click()
   await page.waitForTimeout(2500)
   await page.screenshot({ path: '/tmp/ss3-3d-viewer.png', fullPage: false })
 
-  // Click a hotspot
+  // Click hotspots
   try {
     await page.getByTestId('viewer-hotspots-3').click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: '/tmp/ss4-hotspots.png', fullPage: false })
+  } catch(e) {}
+
+  // Test Top 5 hotspots
+  try {
+    await page.getByTestId('viewer-hotspots-5').click()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: '/tmp/ss4b-hotspots5.png', fullPage: false })
+  } catch(e) {}
+
+  // Test fullscreen
+  try {
+    await page.getByTestId('viewer-fullscreen').click()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: '/tmp/ss5-fullscreen.png', fullPage: false })
+    // Restore
+    await page.getByTestId('viewer-fullscreen').click()
+    await page.waitForTimeout(400)
   } catch(e) {}
 
   // Close viewer
@@ -77,5 +103,11 @@ test('take screenshots', async ({ page }) => {
     await page.getByTestId('close-3d-viewer').click()
     await page.waitForTimeout(500)
   } catch(e) {}
-  await page.screenshot({ path: '/tmp/ss5-back-to-results.png', fullPage: false })
+
+  // Expand a design to see annotated sequence
+  try {
+    await page.locator('[data-testid^="design-spotlight-"]').first().click()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: '/tmp/ss6-design-expanded.png', fullPage: false })
+  } catch(e) {}
 })

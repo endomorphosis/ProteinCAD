@@ -329,6 +329,65 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                   {designs.length} generated
                 </span>
               </div>
+
+              {/* Score comparison chart */}
+              {designs.length > 1 && (
+                <div
+                  data-testid="design-score-chart"
+                  className="mb-4 rounded-2xl border border-white/10 bg-slate-950/40 p-4"
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h5 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
+                      Score Comparison
+                    </h5>
+                    <span className="text-[11px] text-slate-400">{designs.length} designs</span>
+                  </div>
+                  <div className="space-y-2">
+                    {[...designs]
+                      .sort((a, b) => Number(b.bindingScore) - Number(a.bindingScore))
+                      .map((design, rankIdx) => {
+                        const score = Number(design.bindingScore)
+                        const maxScore = Math.max(...designs.map((d) => Number(d.bindingScore)))
+                        const minScore = Math.min(...designs.map((d) => Number(d.bindingScore)))
+                        const range = Math.max(maxScore - minScore, 0.01)
+                        const barPct = Math.round(((score - minScore) / range) * 72 + 28) // 28–100% range
+                        const isTop = rankIdx === 0
+                        return (
+                          <button
+                            key={design.design_id}
+                            type="button"
+                            data-testid={`score-chart-design-${design.design_id}`}
+                            onClick={() => setExpandedDesign(design.design_id)}
+                            className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                          >
+                            <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${isTop ? 'bg-gradient-to-br from-amber-400 to-orange-400 text-slate-900' : 'bg-white/10 text-slate-300'}`}>
+                              {design.design_id + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span className="truncate text-xs font-medium text-slate-200">
+                                  Design {design.design_id + 1}
+                                  {design.diff.length > 0 && (
+                                    <span className="ml-2 text-violet-300">{design.diff.length} mut</span>
+                                  )}
+                                </span>
+                                <span className={`text-xs font-semibold tabular-nums ${isTop ? 'text-amber-300' : 'text-emerald-300'}`}>
+                                  {design.bindingScore}
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                                <div
+                                  className={`h-full rounded-full ${isTop ? 'bg-gradient-to-r from-amber-400 to-emerald-400' : 'bg-emerald-500'}`}
+                                  style={{ width: `${barPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
               {topDesigns.length > 0 && (
                 <div className="mb-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                   {topDesigns.map((design, index) => (
@@ -404,12 +463,35 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                           <div className="space-y-4">
                             <div>
-                              <label className="mb-1 block text-sm font-medium text-slate-300">
+                               <label className="mb-1 block text-sm font-medium text-slate-300">
                                 Binder Sequence
                               </label>
-                              <div className="rounded-2xl border border-white/10 bg-slate-950 p-3 font-mono text-xs text-emerald-300 break-all">
-                                {design.sequence || 'Sequence unavailable'}
-                              </div>
+                              {inputSequence && design.diff.length > 0 ? (
+                                <div
+                                  data-testid={`design-sequence-annotated-${design.design_id}`}
+                                  className="rounded-2xl border border-white/10 bg-slate-950 p-3 font-mono text-xs leading-6 break-all"
+                                >
+                                  {design.sequence.split('').map((aa, pos) => {
+                                    const mutation = design.diff.find((d) => d.position === pos + 1)
+                                    if (mutation) {
+                                      return (
+                                        <span
+                                          key={pos}
+                                          title={`Position ${pos + 1}: ${mutation.from}→${mutation.to}`}
+                                          className="rounded bg-violet-500/40 px-0.5 text-violet-200 ring-1 ring-violet-400/30"
+                                        >
+                                          {aa}
+                                        </span>
+                                      )
+                                    }
+                                    return <span key={pos} className="text-emerald-300">{aa}</span>
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="rounded-2xl border border-white/10 bg-slate-950 p-3 font-mono text-xs text-emerald-300 break-all">
+                                  {design.sequence || 'Sequence unavailable'}
+                                </div>
+                              )}
                             </div>
 
                             <div>
@@ -667,23 +749,53 @@ export default function ResultsViewer({ job, onIterate }: Props) {
           <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-4">
             <h4 className="text-lg font-semibold text-white">Export</h4>
             <p className="mt-1 text-sm text-slate-400">Download the full completed payload for offline analysis.</p>
-            <button
-              onClick={() => {
-                const blob = new Blob([JSON.stringify(job.results, null, 2)], {
-                  type: 'application/json',
-                })
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `${job.job_id}_results.json`
-                a.click()
-                URL.revokeObjectURL(url)
-              }}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-            >
-              <span>💾</span>
-              <span>Download All Results (JSON)</span>
-            </button>
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(job.results, null, 2)], {
+                    type: 'application/json',
+                  })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${job.job_id}_results.json`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+              >
+                <span>💾</span>
+                <span>Download All Results (JSON)</span>
+              </button>
+              <button
+                data-testid="export-designs-csv"
+                onClick={() => {
+                  const headers = ['design_id', 'sequence', 'length', 'score', 'mutations', 'reference_match', 'atoms', 'chains']
+                  const rows = designs.map((d) => [
+                    d.design_id + 1,
+                    d.sequence,
+                    d.sequence.length,
+                    d.bindingScore,
+                    d.diff.length,
+                    d.referenceMatch,
+                    d.structureSummary.atoms,
+                    d.structureSummary.chains.join('|'),
+                  ])
+                  const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
+                  const blob = new Blob([csv], { type: 'text/csv' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${job.job_id}_designs.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+              >
+                <span>📊</span>
+                <span>Export Designs as CSV</span>
+              </button>
+            </div>
           </section>
         </div>
       </div>
