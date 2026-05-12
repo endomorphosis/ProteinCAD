@@ -1002,6 +1002,35 @@ export default function ProteinViewer3D({
     [parsed.chains, parsed.residues, selectedResidues]
   )
 
+  // B-factor profile: per-chain residue bFactor array for SVG sparkline chart
+  const chainBfactorProfiles = useMemo(() => {
+    const result = new Map<string, { residueNum: number; bf: number }[]>()
+    for (const chain of parsed.chains) {
+      const points = parsed.residues
+        .filter((r) => r.chain === chain)
+        .map((r) => ({ residueNum: r.residueNum, bf: r.avgBFactor }))
+        .sort((a, b) => a.residueNum - b.residueNum)
+      result.set(chain, points)
+    }
+    return result
+  }, [parsed.chains, parsed.residues])
+
+  // Contact network keys: residues within neighborRadiusAngstrom of the primary selected residue
+  const contactNetworkKeys = useMemo(() => {
+    if (!selectionSummary) return new Set<string>()
+    const primaryCenter = selectionSummary.primary.center
+    const keys = new Set<string>()
+    for (const residue of parsed.residues) {
+      const center = residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center
+      if (center.distanceTo(primaryCenter) <= neighborRadiusAngstrom) {
+        keys.add(residue.key)
+      }
+    }
+    // Remove the primary itself
+    keys.delete(residueKey(selectionSummary.primary.chain, selectionSummary.primary.residueNum))
+    return keys
+  }, [selectionSummary, parsed.residues, neighborRadiusAngstrom])
+
   const hotspotKeys = useMemo(() => {
     return new Set(
       visibleResidues
@@ -3127,6 +3156,24 @@ export default function ProteinViewer3D({
                         <InspectorStat label="Avg B-factor" value={summary.averageBFactor.toFixed(1)} />
                         <InspectorStat label="Residues" value={String(summary.residueCount)} />
                       </div>
+                      {/* B-factor profile sparkline */}
+                      {(chainBfactorProfiles.get(summary.chain)?.length ?? 0) >= 2 && (
+                        <BfactorSparkline
+                          points={chainBfactorProfiles.get(summary.chain)!}
+                          bfRange={parsed.bFactorRange}
+                          selectedNums={new Set(
+                            selectedResidues
+                              .filter((r) => r.chain === summary.chain)
+                              .map((r) => r.residueNum)
+                          )}
+                          contactNums={new Set(
+                            Array.from(contactNetworkKeys)
+                              .filter((k) => k.startsWith(`${summary.chain}:`))
+                              .map((k) => Number(k.split(':')[1]))
+                          )}
+                          chainName={summary.chain}
+                        />
+                      )}
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         <button
                           data-testid={`viewer-chain-select-${summary.chain}`}
@@ -3337,17 +3384,26 @@ export default function ProteinViewer3D({
                   <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-rose-500/50" />Negative</span>
                   <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-blue-500/50" />Positive</span>
                   <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-green-500/50" />Gly</span>
+                  {contactNetworkKeys.size > 0 && (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
+                      Contact
+                    </span>
+                  )}
                 </div>
                 <div className="mt-4 max-h-56 overflow-y-auto pr-1">
                   <div className="flex flex-wrap gap-2">
                   {sequenceMapEntries.map((entry) => {
                     const label = `${entry.chain}:${entry.residueNum}`
                     const value = entry.sequenceResidue || entry.residue[0] || '?'
+                    const isContact = contactNetworkKeys.has(residueKey(entry.chain, entry.residueNum))
                     const toneClass = entry.isSelected
                       ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-50'
-                      : entry.isHotspot
-                        ? 'border-amber-400/30 bg-amber-400/15 text-amber-50'
-                        : 'border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/10'
+                      : isContact
+                        ? 'border-violet-400/40 bg-violet-400/15 text-violet-50'
+                        : entry.isHotspot
+                          ? 'border-amber-400/30 bg-amber-400/15 text-amber-50'
+                          : 'border-white/10 bg-slate-950/70 text-slate-200 hover:bg-white/10'
                     const aaClass = AA_CLASSES[value.toUpperCase()] || 'bg-slate-600/30 text-slate-200'
                     const bfSpread = Math.max(parsed.bFactorRange.max - parsed.bFactorRange.min, 1)
                     const bfNorm = Math.min(1, Math.max(0, (entry.avgBFactor - parsed.bFactorRange.min) / bfSpread))
@@ -3367,13 +3423,16 @@ export default function ProteinViewer3D({
                           })
                         }
                         className={`rounded-2xl border px-2.5 py-2 text-left transition ${toneClass}`}
-                        title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}`}
+                        title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}${isContact ? ' · within contact radius' : ''}`}
                       >
                         <div className="text-[11px] font-semibold uppercase tracking-wide">{label}</div>
                         <div className="mt-1 flex items-center gap-1">
                           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md text-xs font-bold ${entry.isSelected ? 'bg-white/20 text-white' : aaClass}`}>
                             {value}
                           </span>
+                          {isContact && (
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" title="within contact radius" />
+                          )}
                         </div>
                         {/* B-factor mini bar */}
                         <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
@@ -3650,6 +3709,61 @@ function InspectorStat({
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
       <div data-testid={testId} className="mt-2 text-sm font-medium text-slate-100">
         {value}
+      </div>
+    </div>
+  )
+}
+
+// SVG sparkline chart for B-factor profile of a chain
+function BfactorSparkline({
+  points,
+  bfRange,
+  selectedNums,
+  contactNums,
+  chainName,
+}: {
+  points: { residueNum: number; bf: number }[]
+  bfRange: { min: number; max: number; average: number }
+  selectedNums: Set<number>
+  contactNums: Set<number>
+  chainName: string
+}) {
+  if (points.length < 2) return null
+  const W = 240
+  const H = 40
+  const spread = Math.max(bfRange.max - bfRange.min, 1)
+  const xs = points.map((_, i) => Math.round((i / (points.length - 1)) * W))
+  const ys = points.map((p) => Math.round(H - ((p.bf - bfRange.min) / spread) * H))
+  const pathD = points.map((_, i) => `${i === 0 ? 'M' : 'L'}${xs[i]},${ys[i]}`).join(' ')
+  return (
+    <div data-testid={`viewer-bfactor-sparkline-${chainName}`} className="mt-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">B-factor profile</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full" style={{ height: H }}>
+        {/* Average line */}
+        <line
+          x1={0}
+          y1={Math.round(H - ((bfRange.average - bfRange.min) / spread) * H)}
+          x2={W}
+          y2={Math.round(H - ((bfRange.average - bfRange.min) / spread) * H)}
+          stroke="#475569"
+          strokeWidth="0.75"
+          strokeDasharray="3 2"
+        />
+        {/* Profile line */}
+        <path d={pathD} fill="none" stroke="#22d3ee" strokeWidth="1.5" strokeLinejoin="round" opacity="0.75" />
+        {/* Contact residue dots */}
+        {points.map((p, i) =>
+          contactNums.has(p.residueNum) ? (
+            <circle key={p.residueNum} cx={xs[i]} cy={ys[i]} r="2.5" fill="#f59e0b" fillOpacity="0.85" />
+          ) : selectedNums.has(p.residueNum) ? (
+            <circle key={p.residueNum} cx={xs[i]} cy={ys[i]} r="3" fill="#22d3ee" />
+          ) : null
+        )}
+      </svg>
+      <div className="flex justify-between text-[9px] text-slate-600">
+        <span>{bfRange.min.toFixed(0)}</span>
+        <span>avg {bfRange.average.toFixed(0)}</span>
+        <span>{bfRange.max.toFixed(0)}</span>
       </div>
     </div>
   )
