@@ -110,6 +110,14 @@ test('take screenshots', async ({ page }) => {
     await page.getByTestId('viewer-color-by-chain').click()
   } catch(e) {}
 
+  // Interactive legend filter state
+  try {
+    await page.getByTestId('viewer-legend-chain-B').click()
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: '/tmp/ss5d-legend-chain-b.png', fullPage: false })
+    await page.getByTestId('viewer-legend-chain-B').click()
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()

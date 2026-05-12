@@ -272,7 +272,7 @@ test.describe('Results viewer', () => {
 
     await page.getByTestId('viewer-chain-filter').selectOption('A')
     await page.getByTestId('viewer-focus-residue').fill('A:2')
-    await page.getByTestId('viewer-focus-button').click()
+    await page.getByTestId('viewer-focus-residue').press('Enter')
 
     const modalBox = await page.getByTestId('viewer-modal').boundingBox()
     expect(modalBox?.width || 0).toBeGreaterThan((page.viewportSize()?.width || 0) * 0.75)
@@ -311,6 +311,17 @@ test.describe('Results viewer', () => {
 
     await expect(page.getByTestId('viewer-chain-card-A')).toBeVisible()
     await expect(page.getByTestId('viewer-chain-card-B')).toBeVisible()
+    await expect(page.getByTestId('viewer-legend-chain-A')).toBeVisible()
+    await expect(page.getByTestId('viewer-legend-chain-B')).toBeVisible()
+
+    await page.getByTestId('viewer-legend-chain-B').click()
+    await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('B')
+    await expect(page.getByText(/Showing only chain B/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-legend-chain-B')).toHaveAttribute('aria-pressed', 'true')
+    await page.getByTestId('viewer-legend-chain-B').click()
+    await expect(page.getByTestId('viewer-chain-filter')).toHaveValue('all')
+    await expect(page.getByText(/Showing all chains in the structure/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-legend-chain-B')).toHaveAttribute('aria-pressed', 'false')
 
     await page.getByTestId('viewer-chain-select-B').click()
     await expect(page.getByTestId('variant-positions')).toHaveValue('9,10')

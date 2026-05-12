@@ -87,6 +87,20 @@ test('take after screenshots', async ({ page }) => {
     }
   } catch { /* ok */ }
 
+  // Legend interaction state
+  try {
+    await page.getByTestId('viewer-legend-chain-B').click()
+    await page.waitForTimeout(500)
+    const legend = page.getByTestId('viewer-legend-chain-B')
+    const lb = await legend.boundingBox()
+    if (lb && lb.width > 10) {
+      await page.screenshot({
+        path: '/tmp/ss-after-legend.png',
+        clip: { x: 0, y: Math.max(0, lb.y - 90), width: vp.width, height: Math.min(220, vp.height - Math.max(0, lb.y - 90)) },
+      })
+    }
+  } catch { /* ok */ }
+
   // Select hotspots to show selection spotlight
   await page.getByTestId('viewer-hotspots-3').click()
   await page.waitForTimeout(600)
