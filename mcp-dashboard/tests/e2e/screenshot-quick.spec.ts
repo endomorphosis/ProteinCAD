@@ -1,19 +1,111 @@
 import { test } from '@playwright/test'
 
-const PDB = `ATOM      1  N   ALA A   1      10.000  12.000   2.100  1.00 12.00           N
-ATOM      2  CA  ALA A   1      11.400  12.400   2.100  1.00 12.00           C
-ATOM      3  N   GLY A   2      12.700  13.200   2.100  1.00 18.00           N
-ATOM      4  CA  GLY A   2      13.900  14.000   2.100  1.00 18.00           C
-ATOM      5  N   SER A   3      14.800  15.300   2.800  1.00 24.00           N
-ATOM      6  CA  SER A   3      15.900  16.100   2.400  1.00 24.00           C
-ATOM      7  N   THR A   4      17.200  16.500   3.100  1.00 32.00           N
-ATOM      8  CA  THR A   4      18.400  17.200   2.800  1.00 32.00           C
-ATOM      9  N   HIS B   1      17.500  16.200   2.100  1.00 65.00           N
-ATOM     10  CA  HIS B   1      18.900  16.700   2.100  1.00 65.00           C
-ATOM     11  N   TYR B   2      20.300  17.500   2.100  1.00 72.00           N
-ATOM     12  CA  TYR B   2      21.700  18.100   2.100  1.00 72.00           C
-ATOM     13  N   GLU B   3      22.800  18.900   2.800  1.00 55.00           N
-ATOM     14  CA  GLU B   3      24.100  19.400   2.500  1.00 55.00           C
+// 18-residue alpha-helix (chain A) + 8-residue beta-strand (chain B) for realistic 3D preview
+const PDB = `ATOM      1  N   ALA A   1      13.500  13.700   1.100  1.00 12.00           N
+ATOM      2  CA  ALA A   1      14.300  14.000   1.500  1.00 12.00           C
+ATOM      3  C   ALA A   1      15.400  14.500   1.800  1.00 12.00           C
+ATOM      4  O   ALA A   1      16.100  14.700   1.000  1.00 12.00           O
+ATOM      5  N   LEU A   2      10.801  15.965   2.600  1.00 13.20           N
+ATOM      6  CA  LEU A   2      11.601  16.265   3.000  1.00 13.20           C
+ATOM      7  C   LEU A   2      12.701  16.765   3.300  1.00 13.20           C
+ATOM      8  O   LEU A   2      13.401  16.965   2.500  1.00 13.20           O
+ATOM      9  N   ILE A   3       9.039  12.913   4.100  1.00 14.40           N
+ATOM     10  CA  ILE A   3       9.839  13.213   4.500  1.00 14.40           C
+ATOM     11  C   ILE A   3      10.939  13.713   4.800  1.00 14.40           C
+ATOM     12  O   ILE A   3      11.639  13.913   4.000  1.00 14.40           O
+ATOM     13  N   GLU A   4      12.350  11.708   5.600  1.00 15.60           N
+ATOM     14  CA  GLU A   4      13.150  12.008   6.000  1.00 15.60           C
+ATOM     15  C   GLU A   4      14.250  12.508   6.300  1.00 15.60           C
+ATOM     16  O   GLU A   4      14.950  12.708   5.500  1.00 15.60           O
+ATOM     17  N   LYS A   5      12.962  15.178   7.100  1.00 16.80           N
+ATOM     18  CA  LYS A   5      13.762  15.478   7.500  1.00 16.80           C
+ATOM     19  C   LYS A   5      14.862  15.978   7.800  1.00 16.80           C
+ATOM     20  O   LYS A   5      15.562  16.178   7.000  1.00 16.80           O
+ATOM     21  N   ALA A   6       9.438  15.178   8.600  1.00 18.00           N
+ATOM     22  CA  ALA A   6      10.238  15.478   9.000  1.00 18.00           C
+ATOM     23  C   ALA A   6      11.338  15.978   9.300  1.00 18.00           C
+ATOM     24  O   ALA A   6      12.038  16.178   8.500  1.00 18.00           O
+ATOM     25  N   LEU A   7      10.050  11.708  10.100  1.00 19.20           N
+ATOM     26  CA  LEU A   7      10.850  12.008  10.500  1.00 19.20           C
+ATOM     27  C   LEU A   7      11.950  12.508  10.800  1.00 19.20           C
+ATOM     28  O   LEU A   7      12.650  12.708  10.000  1.00 19.20           O
+ATOM     29  N   GLU A   8      13.361  12.913  11.600  1.00 20.40           N
+ATOM     30  CA  GLU A   8      14.161  13.213  12.000  1.00 20.40           C
+ATOM     31  C   GLU A   8      15.261  13.713  12.300  1.00 20.40           C
+ATOM     32  O   GLU A   8      15.961  13.913  11.500  1.00 20.40           O
+ATOM     33  N   LYS A   9      11.599  15.965  13.100  1.00 21.60           N
+ATOM     34  CA  LYS A   9      12.399  16.265  13.500  1.00 21.60           C
+ATOM     35  C   LYS A   9      13.499  16.765  13.800  1.00 21.60           C
+ATOM     36  O   LYS A   9      14.199  16.965  13.000  1.00 21.60           O
+ATOM     37  N   ASP A  10       8.900  13.700  14.600  1.00 22.80           N
+ATOM     38  CA  ASP A  10       9.700  14.000  15.000  1.00 22.80           C
+ATOM     39  C   ASP A  10      10.800  14.500  15.300  1.00 22.80           C
+ATOM     40  O   ASP A  10      11.500  14.700  14.500  1.00 22.80           O
+ATOM     41  N   ARG A  11      11.599  11.435  16.100  1.00 24.00           N
+ATOM     42  CA  ARG A  11      12.399  11.735  16.500  1.00 24.00           C
+ATOM     43  C   ARG A  11      13.499  12.235  16.800  1.00 24.00           C
+ATOM     44  O   ARG A  11      14.199  12.435  16.000  1.00 24.00           O
+ATOM     45  N   ALA A  12      13.361  14.487  17.600  1.00 25.20           N
+ATOM     46  CA  ALA A  12      14.161  14.787  18.000  1.00 25.20           C
+ATOM     47  C   ALA A  12      15.261  15.287  18.300  1.00 25.20           C
+ATOM     48  O   ALA A  12      15.961  15.487  17.500  1.00 25.20           O
+ATOM     49  N   LEU A  13      10.050  15.692  19.100  1.00 26.40           N
+ATOM     50  CA  LEU A  13      10.850  15.992  19.500  1.00 26.40           C
+ATOM     51  C   LEU A  13      11.950  16.492  19.800  1.00 26.40           C
+ATOM     52  O   LEU A  13      12.650  16.692  19.000  1.00 26.40           O
+ATOM     53  N   ILE A  14       9.438  12.222  20.600  1.00 27.60           N
+ATOM     54  CA  ILE A  14      10.238  12.522  21.000  1.00 27.60           C
+ATOM     55  C   ILE A  14      11.338  13.022  21.300  1.00 27.60           C
+ATOM     56  O   ILE A  14      12.038  13.222  20.500  1.00 27.60           O
+ATOM     57  N   SER A  15      12.962  12.222  22.100  1.00 28.80           N
+ATOM     58  CA  SER A  15      13.762  12.522  22.500  1.00 28.80           C
+ATOM     59  C   SER A  15      14.862  13.022  22.800  1.00 28.80           C
+ATOM     60  O   SER A  15      15.562  13.222  22.000  1.00 28.80           O
+ATOM     61  N   GLU A  16      12.350  15.692  23.600  1.00 30.00           N
+ATOM     62  CA  GLU A  16      13.150  15.992  24.000  1.00 30.00           C
+ATOM     63  C   GLU A  16      14.250  16.492  24.300  1.00 30.00           C
+ATOM     64  O   GLU A  16      14.950  16.692  23.500  1.00 30.00           O
+ATOM     65  N   LYS A  17       9.039  14.487  25.100  1.00 31.20           N
+ATOM     66  CA  LYS A  17       9.839  14.787  25.500  1.00 31.20           C
+ATOM     67  C   LYS A  17      10.939  15.287  25.800  1.00 31.20           C
+ATOM     68  O   LYS A  17      11.639  15.487  25.000  1.00 31.20           O
+ATOM     69  N   ARG A  18      10.801  11.435  26.600  1.00 32.40           N
+ATOM     70  CA  ARG A  18      11.601  11.735  27.000  1.00 32.40           C
+ATOM     71  C   ARG A  18      12.701  12.235  27.300  1.00 32.40           C
+ATOM     72  O   ARG A  18      13.401  12.435  26.500  1.00 32.40           O
+TER
+ATOM     73  N   VAL B   1       6.800  -5.000   1.500  1.00 30.00           N
+ATOM     74  CA  VAL B   1       8.000  -5.000   2.000  1.00 30.00           C
+ATOM     75  C   VAL B   1       9.100  -5.000   2.400  1.00 30.00           C
+ATOM     76  O   VAL B   1       8.600  -4.000   2.800  1.00 30.00           O
+ATOM     77  N   ILE B   2      10.600  -5.000   2.500  1.00 33.00           N
+ATOM     78  CA  ILE B   2      11.800  -5.000   3.000  1.00 33.00           C
+ATOM     79  C   ILE B   2      12.900  -5.000   3.400  1.00 33.00           C
+ATOM     80  O   ILE B   2      12.400  -4.000   3.800  1.00 33.00           O
+ATOM     81  N   LEU B   3      14.400  -5.000   1.500  1.00 36.00           N
+ATOM     82  CA  LEU B   3      15.600  -5.000   2.000  1.00 36.00           C
+ATOM     83  C   LEU B   3      16.700  -5.000   2.400  1.00 36.00           C
+ATOM     84  O   LEU B   3      16.200  -4.000   2.800  1.00 36.00           O
+ATOM     85  N   PHE B   4      18.200  -5.000   2.500  1.00 39.00           N
+ATOM     86  CA  PHE B   4      19.400  -5.000   3.000  1.00 39.00           C
+ATOM     87  C   PHE B   4      20.500  -5.000   3.400  1.00 39.00           C
+ATOM     88  O   PHE B   4      20.000  -4.000   3.800  1.00 39.00           O
+ATOM     89  N   TYR B   5      22.000  -5.000   1.500  1.00 42.00           N
+ATOM     90  CA  TYR B   5      23.200  -5.000   2.000  1.00 42.00           C
+ATOM     91  C   TYR B   5      24.300  -5.000   2.400  1.00 42.00           C
+ATOM     92  O   TYR B   5      23.800  -4.000   2.800  1.00 42.00           O
+ATOM     93  N   ALA B   6      25.800  -5.000   2.500  1.00 45.00           N
+ATOM     94  CA  ALA B   6      27.000  -5.000   3.000  1.00 45.00           C
+ATOM     95  C   ALA B   6      28.100  -5.000   3.400  1.00 45.00           C
+ATOM     96  O   ALA B   6      27.600  -4.000   3.800  1.00 45.00           O
+ATOM     97  N   GLY B   7      29.600  -5.000   1.500  1.00 48.00           N
+ATOM     98  CA  GLY B   7      30.800  -5.000   2.000  1.00 48.00           C
+ATOM     99  C   GLY B   7      31.900  -5.000   2.400  1.00 48.00           C
+ATOM    100  O   GLY B   7      31.400  -4.000   2.800  1.00 48.00           O
+ATOM    101  N   LEU B   8      33.400  -5.000   2.500  1.00 51.00           N
+ATOM    102  CA  LEU B   8      34.600  -5.000   3.000  1.00 51.00           C
+ATOM    103  C   LEU B   8      35.700  -5.000   3.400  1.00 51.00           C
+ATOM    104  O   LEU B   8      35.200  -4.000   3.800  1.00 51.00           O
 TER
 END
 `
@@ -24,13 +116,13 @@ const JOB = {
   created_at: new Date(Date.now() - 120000).toISOString(),
   updated_at: new Date().toISOString(),
   job_name: 'Screenshot Job',
-  input: { sequence: 'AGSTHYE', num_designs: 2 },
+  input: { sequence: 'ALIEKALE', num_designs: 2 },
   progress: { alphafold: 'completed', rfdiffusion: 'completed', proteinmpnn: 'completed', alphafold_multimer: 'completed' },
   results: {
     target_structure: { pdb: PDB },
     designs: [
-      { design_id: 0, backbone: { pdb: PDB }, sequence: { sequence: 'AGSTHYE' }, complex_structure: { pdb: PDB } },
-      { design_id: 1, backbone: { pdb: PDB }, sequence: { sequence: 'AGSTKYERR' }, complex_structure: { pdb: PDB } },
+      { design_id: 0, backbone: { pdb: PDB }, sequence: { sequence: 'ALIEKALE' }, complex_structure: { pdb: PDB } },
+      { design_id: 1, backbone: { pdb: PDB }, sequence: { sequence: 'ALIEKDRALE' }, complex_structure: { pdb: PDB } },
     ],
   },
   error: null,

@@ -157,6 +157,37 @@ const MIN_CAMERA_TANGENT = 0.001
 const MAX_RENDERER_PIXEL_RATIO = 2
 const AUTO_ROTATE_SPEED = 1.2
 
+// Eisenberg consensus hydrophobicity scale (3-letter → value in Å²·kcal/mol).
+// Positive = hydrophobic, negative = hydrophilic.
+const HYDROPHOBICITY_SCALE: Record<string, number> = {
+  ILE: 1.38, PHE: 1.19, VAL: 1.08, LEU: 1.06, TRP: 0.81, MET: 0.64,
+  ALA: 0.62, GLY: 0.48, CYS: 0.29, TYR: 0.26, PRO: 0.12, THR: -0.05,
+  SER: -0.18, HIS: -0.40, GLU: -0.74, ASN: -0.78, GLN: -0.85,
+  ASP: -0.90, LYS: -1.50, ARG: -2.53,
+}
+const HYDRO_MIN = -2.53
+const HYDRO_MAX = 1.38
+
+// Full amino-acid names for tooltip enrichment
+const AA_FULL_NAMES: Record<string, string> = {
+  ALA: 'Alanine', ARG: 'Arginine', ASN: 'Asparagine', ASP: 'Aspartate',
+  CYS: 'Cysteine', GLN: 'Glutamine', GLU: 'Glutamate', GLY: 'Glycine',
+  HIS: 'Histidine', ILE: 'Isoleucine', LEU: 'Leucine', LYS: 'Lysine',
+  MET: 'Methionine', PHE: 'Phenylalanine', PRO: 'Proline', SER: 'Serine',
+  THR: 'Threonine', TRP: 'Tryptophan', TYR: 'Tyrosine', VAL: 'Valine',
+  UNK: 'Unknown',
+}
+
+function getHydrophobicityColor(residueName: string): THREE.Color {
+  const val = HYDROPHOBICITY_SCALE[residueName.toUpperCase()] ?? 0
+  const norm = (val - HYDRO_MIN) / (HYDRO_MAX - HYDRO_MIN) // 0=hydrophilic, 1=hydrophobic
+  // Blue (hydrophilic, 215°) → White (neutral) → Orange (hydrophobic, 30°)
+  const hue = norm < 0.5 ? 215 - norm * 2 * (215 - 0) / 1 : 30
+  const sat = norm < 0.5 ? 0.75 * (1 - norm * 2) : 0.80 * (norm * 2 - 1)
+  const light = 0.52 + 0.25 * (1 - Math.abs(norm * 2 - 1)) // brighter in middle
+  return new THREE.Color().setHSL(hue / 360, sat, light)
+}
+
 function residueKey(chain: string, residueNum: number) {
   return `${chain || '_'}:${residueNum}`
 }
@@ -267,21 +298,27 @@ function detectSecondaryStructure(residues: ResidueSummary[]): Segment[] {
     const v1 = new THREE.Vector3(current.x - prev.x, current.y - prev.y, current.z - prev.z).normalize()
     const v2 = new THREE.Vector3(next.x - current.x, next.y - current.y, next.z - current.z).normalize()
     const angle = THREE.MathUtils.radToDeg(v1.angleTo(v2))
-    const helixDistance = distance(current, lookahead)
+    // i→i+2 distance: ~5–6 Å for helix, ~6.5–7.5 Å for extended strand
+    const iToI2Distance = distance(current, lookahead)
+    // i-1→i+1 distance: ~5 Å for helix, ~6.5–7.5 Å for extended strand
     const strandDistance = distance(prev, next)
 
-    if (helixDistance >= 4.8 && helixDistance <= 6.4 && angle >= 65 && angle <= 130) {
+    // Alpha-helix: consecutive Cα bond vectors turn ~80–100°, i→i+2 distance ~4.8–6.4 Å
+    if (iToI2Distance >= 4.8 && iToI2Distance <= 6.4 && angle >= 65 && angle <= 130) {
       labels[index] = 'helix'
       labels[index + 1] = 'helix'
       continue
     }
 
-    if (strandDistance >= 6.1 && strandDistance <= 7.5 && angle >= 135) {
+    // Beta-strand: extended backbone → consecutive bond vectors nearly parallel (small angle),
+    // i-1→i+1 distance > 6.2 Å and i→i+2 distance > 6.0 Å
+    if (strandDistance >= 6.2 && iToI2Distance >= 6.0 && angle <= 40) {
       labels[index] = 'sheet'
       continue
     }
 
-    if (angle >= 110 && angle < 135) {
+    // Turn: moderate bend
+    if (angle >= 100 && angle < 145) {
       labels[index] = 'turn'
     }
   }
@@ -642,7 +679,8 @@ function buildMolecule(
   heatmap: boolean,
   colorByChain: boolean,
   selectedChain: string,
-  selectedResidues: ResidueSelection[]
+  selectedResidues: ResidueSelection[],
+  showHydrophobicity: boolean
 ): BuildResult {
   const group = new THREE.Group()
   const selectedKeys = new Set(selectedResidues.map((residue) => residueKey(residue.chain, residue.residueNum)))
@@ -668,20 +706,51 @@ function buildMolecule(
 
   if (mode === 'ribbon') {
     chainGroups.forEach((residues, chain) => {
-      const chainColor = (colorByChain && !heatmap) ? chainPaletteColor(chain, model.chains) : undefined
+      const chainColor = (colorByChain && !heatmap && !showHydrophobicity) ? chainPaletteColor(chain, model.chains) : undefined
       createRibbonRepresentation(group, residues, model, heatmap, selectedKeys, chainColor)
     })
   } else if (mode === 'cartoon') {
     chainGroups.forEach((residues, chain) => {
-      const chainColor = (colorByChain && !heatmap) ? chainPaletteColor(chain, model.chains) : undefined
+      const chainColor = (colorByChain && !heatmap && !showHydrophobicity) ? chainPaletteColor(chain, model.chains) : undefined
       createCartoonRepresentation(group, residues, model, heatmap, selectedKeys, chainColor)
     })
   } else if (mode === 'sphere') {
     createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, false)
   } else if (mode === 'surface') {
-    createSpacefillRepresentation(group, visibleAtoms, visibleResidues, model, heatmap, colorByChain, selectedKeys)
+    createSpacefillRepresentation(group, visibleAtoms, visibleResidues, model, heatmap, colorByChain && !showHydrophobicity, selectedKeys)
   } else {
     createAtomicRepresentation(group, visibleAtoms, visibleResidues, selectedKeys, true)
+  }
+
+  // Hydrophobicity overlay: colored Cα spheres on top of the structure
+  if (showHydrophobicity && !heatmap) {
+    const isSurfaceMode = mode === 'surface'
+    for (const residue of visibleResidues) {
+      if (!residue.caAtom) continue
+      const center = getAtomPosition(residue.caAtom)
+      const hydroColor = getHydrophobicityColor(residue.residue)
+      const isSelected = selectedKeys.has(residue.key)
+      const sphereRadius = isSurfaceMode ? 1.6 : 0.45
+      const opacity = isSurfaceMode ? 0.72 : (isSelected ? 0.95 : 0.85)
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(sphereRadius, 14, 10),
+        new THREE.MeshPhongMaterial({
+          color: hydroColor,
+          shininess: 40,
+          transparent: true,
+          opacity,
+          depthWrite: !isSurfaceMode,
+        })
+      )
+      sphere.position.copy(center)
+      sphere.userData = {
+        kind: 'residue',
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+      }
+      group.add(sphere)
+    }
   }
 
   for (const residue of visibleResidues) {
@@ -787,6 +856,7 @@ export default function ProteinViewer3D({
   const [renderMode, setRenderMode] = useState<RenderMode>('ribbon')
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [colorByChain, setColorByChain] = useState(true)
+  const [showHydrophobicity, setShowHydrophobicity] = useState(false)
   const [selectedResidues, setSelectedResidues] = useState<ResidueSelection[]>([])
   const [positionsText, setPositionsText] = useState('')
   const [numVariants, setNumVariants] = useState(DEFAULT_NUM_VARIANTS)
@@ -1145,6 +1215,10 @@ export default function ProteinViewer3D({
         case 'h':
           setShowHeatmap((prev) => !prev)
           setAnalysisMessage('Toggled B-factor heatmap.')
+          break
+        case 'y':
+          setShowHydrophobicity((prev) => !prev)
+          setAnalysisMessage('Toggled hydrophobicity coloring.')
           break
         default:
           break
@@ -1840,7 +1914,8 @@ export default function ProteinViewer3D({
         showHeatmap,
         colorByChain,
         selectedChain,
-        selectedResidues
+        selectedResidues,
+        showHydrophobicity
       )
       residueCentersRef.current = residueCenters
       moleculeRef.current = group
@@ -1991,6 +2066,7 @@ export default function ProteinViewer3D({
     selectedChain,
     selectedResidues,
     showHeatmap,
+    showHydrophobicity,
     residueDetailsMap,
     toggleResidueSelection,
     cancelHoverClear,
@@ -2084,6 +2160,19 @@ export default function ProteinViewer3D({
               </button>
 
               <button
+                data-testid="viewer-hydrophobicity"
+                onClick={() => setShowHydrophobicity((prev) => !prev)}
+                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                  showHydrophobicity
+                    ? 'bg-orange-400 text-slate-950'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title="Hydrophobicity coloring (orange=hydrophobic, blue=hydrophilic)"
+              >
+                Hydrophobicity
+              </button>
+
+              <button
                 data-testid="viewer-color-by-chain"
                 onClick={() => setColorByChain((prev) => !prev)}
                 className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
@@ -2171,7 +2260,7 @@ export default function ProteinViewer3D({
               data-testid="viewer-shortcut-hints"
               className="border-b border-white/10 px-4 pb-3 text-xs text-slate-400"
             >
-              Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap
+              Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap · Y hydrophobicity
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2812,6 +2901,11 @@ export default function ProteinViewer3D({
                           <div data-testid="viewer-hover-spotlight-label" className="mt-1 text-sm font-semibold text-white">
                             {hoverInfo.label}
                           </div>
+                          {AA_FULL_NAMES[hoverInfo.residue.toUpperCase()] && (
+                            <div className="mt-0.5 text-xs text-slate-400">
+                              {AA_FULL_NAMES[hoverInfo.residue.toUpperCase()]}
+                            </div>
+                          )}
                         </div>
                         <div className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-medium text-slate-300">
                           {hoverInfo.atomCount} atoms
@@ -2830,6 +2924,25 @@ export default function ProteinViewer3D({
                             {hoverInfo.sequenceResidue || 'n/a'}
                           </div>
                         </div>
+                        {HYDROPHOBICITY_SCALE[hoverInfo.residue.toUpperCase()] !== undefined && (
+                          <div className="col-span-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Hydrophobicity</div>
+                            <div className="mt-1 flex items-center gap-2">
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${((HYDROPHOBICITY_SCALE[hoverInfo.residue.toUpperCase()] - HYDRO_MIN) / (HYDRO_MAX - HYDRO_MIN)) * 100}%`,
+                                    background: 'linear-gradient(to right, #60a5fa, #fb923c)',
+                                  }}
+                                />
+                              </div>
+                              <span className="shrink-0 font-semibold text-white">
+                                {HYDROPHOBICITY_SCALE[hoverInfo.residue.toUpperCase()].toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <p className="mt-3 text-xs leading-5 text-slate-400">
                         Hover reveals residue context before you commit it to the active structural analysis set.
@@ -3596,7 +3709,21 @@ export default function ProteinViewer3D({
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Legend</h4>
               <div className="mt-3 space-y-2 text-sm text-slate-300">
-                {colorByChain && !showHeatmap && (renderMode === 'ribbon' || renderMode === 'cartoon') ? (
+                {showHydrophobicity && !showHeatmap ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+                      <span>Hydrophilic</span>
+                      <div
+                        className="h-3 flex-1 rounded-full"
+                        style={{ background: 'linear-gradient(to right, #3b82f6, #f5f5f5, #fb923c)' }}
+                      />
+                      <span>Hydrophobic</span>
+                    </div>
+                    <p className="pt-1 text-xs text-slate-500">
+                      Eisenberg scale: blue = hydrophilic, orange = hydrophobic. Press Y to toggle.
+                    </p>
+                  </>
+                ) : colorByChain && !showHeatmap && (renderMode === 'ribbon' || renderMode === 'cartoon') ? (
                   <>
                     {parsed.chains.map((chain, i) => (
                       <LegendItem
