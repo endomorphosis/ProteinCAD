@@ -210,16 +210,48 @@ test('take screenshots', async ({ page }) => {
     await page.getByTestId('viewer-legend-chain-B').click()
   } catch(e) {}
 
+  // Capture new features: SS bar and AA composition in sidebar
+  try {
+    await page.getByTestId('viewer-ss-bar').scrollIntoViewIfNeeded()
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: '/tmp/ss7-ss-bar.png', fullPage: false })
+  } catch(e) {}
+
+  // Capture chain legend overlay (chain colors on)
+  try {
+    const legendOverlay = page.getByTestId('viewer-chain-legend-overlay')
+    if (await legendOverlay.isVisible()) {
+      await page.screenshot({ path: '/tmp/ss7b-chain-legend-overlay.png', fullPage: false })
+    }
+  } catch(e) {}
+
+  // Scroll to AA composition panel in sidebar
+  try {
+    const aaComp = page.getByTestId('viewer-aa-composition')
+    if (await aaComp.isVisible()) {
+      await aaComp.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: '/tmp/ss7c-aa-composition.png', fullPage: false })
+    }
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()
     await page.waitForTimeout(500)
   } catch(e) {}
 
-  // Expand a design to see annotated sequence
+  // Expand a design to see annotated sequence and AA bar
   try {
     await page.locator('[data-testid^="design-spotlight-"]').first().click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: '/tmp/ss6-design-expanded.png', fullPage: false })
+    // Scroll to the AA composition bar
+    const aaBar = page.getByTestId('design-aa-bar-0')
+    if (await aaBar.isVisible()) {
+      await aaBar.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: '/tmp/ss8-design-aa-bar.png', fullPage: false })
+    }
   } catch(e) {}
 })

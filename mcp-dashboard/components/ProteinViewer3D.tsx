@@ -2293,31 +2293,63 @@ export default function ProteinViewer3D({
                 data-testid="viewer-ss-composition"
                 className="border-b border-white/10 px-4 py-3"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    Secondary structure
-                  </div>
-                  {visibleResidues.filter((r) => r.caAtom).length < 5 ? (
-                    <span className="text-[11px] italic text-slate-500">too few residues</span>
-                  ) : (
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
-                        Helix {secondaryStructureComposition.helix}%
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
-                        Sheet {secondaryStructureComposition.sheet}%
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />
-                        Turn {secondaryStructureComposition.turn}%
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
-                        Coil {secondaryStructureComposition.coil}%
-                      </span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Secondary structure
                     </div>
+                    {visibleResidues.filter((r) => r.caAtom).length < 5 ? (
+                      <span className="text-[11px] italic text-slate-500">too few residues</span>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="viewer-ss-copy-fasta"
+                        onClick={async () => {
+                          const THREE_TO_ONE_LOCAL: Record<string, string> = { ALA:'A',ARG:'R',ASN:'N',ASP:'D',CYS:'C',GLN:'Q',GLU:'E',GLY:'G',HIS:'H',ILE:'I',LEU:'L',LYS:'K',MET:'M',PHE:'F',PRO:'P',SER:'S',THR:'T',TRP:'W',TYR:'Y',VAL:'V' }
+                          const seq = visibleResidues.map((r) => r.residue.length === 3 ? (THREE_TO_ONE_LOCAL[r.residue] ?? r.residue[0] ?? '?') : r.residue[0] ?? '?').join('')
+                          if (seq) {
+                            await copyTextToClipboard(`>Structure_${seq.length}aa\n${seq}`)
+                            setAnalysisMessage(`Copied full sequence FASTA (${seq.length} residues).`)
+                          }
+                        }}
+                        className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-300 transition hover:bg-white/10"
+                        title="Copy full visible sequence as FASTA"
+                      >
+                        Copy FASTA
+                      </button>
+                    )}
+                  </div>
+                  {visibleResidues.filter((r) => r.caAtom).length >= 5 && (
+                    <>
+                      <div
+                        data-testid="viewer-ss-bar"
+                        className="flex h-2.5 w-full overflow-hidden rounded-full"
+                        title={`Helix ${secondaryStructureComposition.helix}% · Sheet ${secondaryStructureComposition.sheet}% · Turn ${secondaryStructureComposition.turn}% · Coil ${secondaryStructureComposition.coil}%`}
+                      >
+                        {secondaryStructureComposition.helix > 0 && <div className="bg-rose-500/80" style={{ width: `${secondaryStructureComposition.helix}%` }} />}
+                        {secondaryStructureComposition.sheet > 0 && <div className="bg-yellow-500/80" style={{ width: `${secondaryStructureComposition.sheet}%` }} />}
+                        {secondaryStructureComposition.turn > 0 && <div className="bg-cyan-500/80" style={{ width: `${secondaryStructureComposition.turn}%` }} />}
+                        {secondaryStructureComposition.coil > 0 && <div className="bg-slate-500/70" style={{ width: `${secondaryStructureComposition.coil}%` }} />}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
+                          Helix {secondaryStructureComposition.helix}%
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
+                          Sheet {secondaryStructureComposition.sheet}%
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />
+                          Turn {secondaryStructureComposition.turn}%
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
+                          Coil {secondaryStructureComposition.coil}%
+                        </span>
+                      </div>
+                    </>
                   )}
                 </div>
                 {/* Per-residue sequence strip replaces the aggregate bar */}
@@ -2915,6 +2947,27 @@ export default function ProteinViewer3D({
                     </div>
                   )}
 
+                  {/* Chain color legend overlay */}
+                  {colorByChain && !showHeatmap && !showHydrophobicity && parsed.chains.length > 1 && (
+                    <div
+                      data-testid="viewer-chain-legend-overlay"
+                      className="pointer-events-none absolute bottom-4 right-4 rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-xs backdrop-blur-sm"
+                    >
+                      <div className="mb-1.5 font-semibold uppercase tracking-wide text-slate-400">Chains</div>
+                      <div className="space-y-1">
+                        {parsed.chains.map((chain, i) => (
+                          <div key={chain} className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: `#${new THREE.Color(CHAIN_PALETTE[i % CHAIN_PALETTE.length]).getHexString()}` }}
+                            />
+                            <span className="text-slate-200">Chain {chain}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Hover residue tooltip */}
                   {hoverInfo && (
                     <div
@@ -2964,6 +3017,20 @@ export default function ProteinViewer3D({
                             {hoverInfo.sequenceResidue || 'n/a'}
                           </div>
                         </div>
+                        {(() => {
+                          const ssType = residueSSTypes.get(residueKey(hoverInfo.chain, hoverInfo.residueNum))
+                          if (!ssType) return null
+                          const ssHex = ssType === 'helix' ? '#fb7185' : ssType === 'sheet' ? '#facc15' : ssType === 'turn' ? '#22d3ee' : '#94a3b8'
+                          return (
+                            <div className="col-span-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-slate-500">Structure type</div>
+                              <div className="mt-1 flex items-center gap-1.5">
+                                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: ssHex }} />
+                                <span className="font-semibold capitalize text-white">{ssType}</span>
+                              </div>
+                            </div>
+                          )
+                        })()}
                         {HYDROPHOBICITY_SCALE[hoverInfo.residue.toUpperCase()] !== undefined && (
                           <div className="col-span-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                             <div className="text-[10px] uppercase tracking-wide text-slate-500">Hydrophobicity</div>
@@ -3747,6 +3814,12 @@ export default function ProteinViewer3D({
             )}
 
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">AA composition</h4>
+              <p className="mt-1 text-xs text-slate-400">Physicochemical class breakdown of {visibleResidues.length} visible residues.</p>
+              <AaCompositionChart residues={visibleResidues} />
+            </section>
+
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Legend</h4>
               <div className="mt-3 space-y-2 text-sm text-slate-300">
                 {showHydrophobicity && !showHeatmap ? (
@@ -3876,6 +3949,68 @@ function InspectorStat({
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
       <div data-testid={testId} className="mt-2 text-sm font-medium text-slate-100">
         {value}
+      </div>
+    </div>
+  )
+}
+
+const THREE_TO_ONE_AA: Record<string, string> = { ALA:'A',ARG:'R',ASN:'N',ASP:'D',CYS:'C',GLN:'Q',GLU:'E',GLY:'G',HIS:'H',ILE:'I',LEU:'L',LYS:'K',MET:'M',PHE:'F',PRO:'P',SER:'S',THR:'T',TRP:'W',TYR:'Y',VAL:'V' }
+const AA_PHYS_CLASS: Record<string, 'hydrophobic' | 'polar' | 'negative' | 'positive' | 'special'> = {
+  A: 'hydrophobic', V: 'hydrophobic', L: 'hydrophobic', I: 'hydrophobic', M: 'hydrophobic',
+  F: 'hydrophobic', W: 'hydrophobic', P: 'hydrophobic',
+  S: 'polar', T: 'polar', C: 'polar', Y: 'polar', N: 'polar', Q: 'polar',
+  D: 'negative', E: 'negative',
+  K: 'positive', R: 'positive', H: 'positive',
+  G: 'special',
+}
+const AA_CLASS_CONFIG = [
+  { key: 'hydrophobic', label: 'Hydrophobic', color: '#94a3b8', bg: 'bg-slate-400/70' },
+  { key: 'polar', label: 'Polar', color: '#2dd4bf', bg: 'bg-teal-400/70' },
+  { key: 'negative', label: 'Negative', color: '#fb7185', bg: 'bg-rose-400/70' },
+  { key: 'positive', label: 'Positive', color: '#60a5fa', bg: 'bg-blue-400/70' },
+  { key: 'special', label: 'Gly/Pro', color: '#86efac', bg: 'bg-green-400/70' },
+] as const
+
+function AaCompositionChart({ residues }: { residues: ResidueSummary[] }) {
+  if (residues.length === 0) return <p className="mt-2 text-xs text-slate-500">No residues to analyse.</p>
+  const counts: Record<string, number> = { hydrophobic: 0, polar: 0, negative: 0, positive: 0, special: 0, unknown: 0 }
+  for (const r of residues) {
+    const one = r.residue.length === 3 ? (THREE_TO_ONE_AA[r.residue] ?? '') : r.residue[0] ?? ''
+    const cls = AA_PHYS_CLASS[one.toUpperCase()] ?? 'unknown'
+    counts[cls] += 1
+  }
+  const total = residues.length
+  return (
+    <div className="mt-3 space-y-2.5" data-testid="viewer-aa-composition">
+      {/* Stacked proportion bar */}
+      <div className="flex h-3 w-full overflow-hidden rounded-full" data-testid="viewer-aa-comp-bar">
+        {AA_CLASS_CONFIG.map(({ key, color }) => {
+          const pct = (counts[key] / total) * 100
+          if (pct < 0.5) return null
+          return (
+            <div
+              key={key}
+              style={{ width: `${pct}%`, backgroundColor: color + 'cc' }}
+              title={`${key}: ${Math.round(pct)}%`}
+            />
+          )
+        })}
+      </div>
+      {/* Per-class breakdown */}
+      <div className="space-y-1">
+        {AA_CLASS_CONFIG.map(({ key, label, color }) => {
+          const count = counts[key]
+          const pct = Math.round((count / total) * 100)
+          if (count === 0) return null
+          return (
+            <div key={key} className="flex items-center gap-2 text-[11px]">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+              <span className="flex-1 text-slate-400">{label}</span>
+              <span className="font-semibold tabular-nums text-slate-200">{pct}%</span>
+              <span className="tabular-nums text-slate-500">({count})</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

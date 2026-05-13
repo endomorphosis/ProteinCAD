@@ -12,6 +12,65 @@ import {
 
 const ProteinViewer3D = dynamic(() => import('./ProteinViewer3D'), { ssr: false })
 
+// Amino acid one-letter → color class for sequence display
+const AA_COLOR_CLASSES: Record<string, string> = {
+  A: 'text-slate-300', V: 'text-slate-300', L: 'text-slate-300', I: 'text-slate-300',
+  M: 'text-slate-300', F: 'text-slate-200', W: 'text-slate-200', P: 'text-slate-400',
+  S: 'text-teal-300', T: 'text-teal-300', C: 'text-yellow-300', Y: 'text-teal-200',
+  N: 'text-teal-300', Q: 'text-teal-300',
+  D: 'text-rose-300', E: 'text-rose-300',
+  K: 'text-blue-300', R: 'text-blue-200', H: 'text-blue-300',
+  G: 'text-green-300',
+}
+
+// Physicochemical class for composition bars
+const AA_PHYS_CLASS_RESULTS: Record<string, string> = {
+  A: 'hydrophobic', V: 'hydrophobic', L: 'hydrophobic', I: 'hydrophobic', M: 'hydrophobic',
+  F: 'hydrophobic', W: 'hydrophobic', P: 'hydrophobic',
+  S: 'polar', T: 'polar', C: 'polar', Y: 'polar', N: 'polar', Q: 'polar',
+  D: 'negative', E: 'negative',
+  K: 'positive', R: 'positive', H: 'positive',
+  G: 'special',
+}
+
+const AA_CLASS_COLORS: Record<string, string> = {
+  hydrophobic: '#94a3b8',
+  polar: '#2dd4bf',
+  negative: '#fb7185',
+  positive: '#60a5fa',
+  special: '#86efac',
+}
+
+function AaCompositionBar({ sequence, testId }: { sequence: string; testId?: string }) {
+  if (!sequence) return null
+  const counts: Record<string, number> = {}
+  for (const aa of sequence) {
+    const cls = AA_PHYS_CLASS_RESULTS[aa.toUpperCase()] ?? 'unknown'
+    counts[cls] = (counts[cls] ?? 0) + 1
+  }
+  const total = sequence.length
+  const classes = ['hydrophobic', 'polar', 'negative', 'positive', 'special']
+  return (
+    <div
+      data-testid={testId}
+      className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full"
+      title="Amino acid class composition"
+    >
+      {classes.map((key) => {
+        const pct = ((counts[key] ?? 0) / total) * 100
+        if (pct < 0.5) return null
+        return (
+          <div
+            key={key}
+            style={{ width: `${pct}%`, backgroundColor: (AA_CLASS_COLORS[key] ?? '#94a3b8') + 'bb' }}
+            title={`${key}: ${Math.round(pct)}%`}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 interface Props {
   job: Job
   onIterate?: (input: { sequence: string; num_designs?: number }) => void
@@ -489,14 +548,24 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                                         </span>
                                       )
                                     }
-                                    return <span key={pos} className="text-emerald-300">{aa}</span>
+                                    return <span key={pos} className={AA_COLOR_CLASSES[aa.toUpperCase()] ?? 'text-emerald-300'}>{aa}</span>
                                   })}
                                 </div>
                               ) : (
-                                <div className="rounded-2xl border border-white/10 bg-slate-950 p-3 font-mono text-xs text-emerald-300 break-all">
-                                  {design.sequence || 'Sequence unavailable'}
+                                <div
+                                  data-testid={`design-sequence-plain-${design.design_id}`}
+                                  className="rounded-2xl border border-white/10 bg-slate-950 p-3 font-mono text-xs leading-6 break-all"
+                                >
+                                  {design.sequence ? (
+                                    design.sequence.split('').map((aa, idx) => (
+                                      <span key={idx} className={AA_COLOR_CLASSES[aa.toUpperCase()] ?? 'text-emerald-300'}>{aa}</span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-500">Sequence unavailable</span>
+                                  )}
                                 </div>
                               )}
+                              <AaCompositionBar sequence={design.sequence} testId={`design-aa-bar-${design.design_id}`} />
                             </div>
 
                             <div>
