@@ -404,20 +404,27 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                         </span>
                         <span className="text-xs font-medium text-slate-400">{design.structureStatus}</span>
                       </div>
-                      <div className="mt-3">
-                        <div className="text-base font-semibold text-white">Design {design.design_id + 1}</div>
-                        <div className="mt-1 text-xs text-slate-400">
-                          {design.sequence.length || 0} aa · {design.structureSummary.chains.length || 0} chain
-                          {design.structureSummary.chains.length === 1 ? '' : 's'}
+                      <div className="mt-3 flex items-center gap-3">
+                        <ScoreRing score={Number(design.bindingScore)} size={60} />
+                        <div>
+                          <div className="text-base font-semibold text-white">Design {design.design_id + 1}</div>
+                          <div className="mt-0.5 text-xs text-slate-400">
+                            {design.sequence.length || 0} aa · {design.structureSummary.chains.length || 0} chain
+                            {design.structureSummary.chains.length === 1 ? '' : 's'}
+                          </div>
+                          <div className="mt-1.5 flex gap-2">
+                            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                              {design.diff.length} mut
+                            </span>
+                            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                              {design.structureSummary.atoms} atoms
+                            </span>
+                          </div>
                         </div>
                       </div>
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <CompactStat label="Score" value={design.bindingScore} />
-                        <CompactStat label="Mutations" value={String(design.diff.length)} />
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-300">
+                      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-400">
                         <span>Match {design.referenceMatch}</span>
-                        <span>{design.structureSummary.atoms} atoms</span>
+                        <span className="text-emerald-300 font-medium">Score {design.bindingScore}</span>
                       </div>
                     </button>
                   ))}
@@ -443,9 +450,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 text-sm font-bold text-white">
-                            {design.design_id + 1}
-                          </div>
+                          <ScoreRing score={numericBindingScore} size={52} />
                           <div>
                             <h5 className="text-base font-semibold text-white">Design {design.design_id + 1}</h5>
                             <p className="text-xs text-slate-400">Sequence length: {design.sequence.length || 0} aa</p>
@@ -833,6 +838,42 @@ function stableScore(sequence: string, designId: number): string {
   const x = (u % 1_000_000) / 1_000_000
   const score = 0.65 + x * (0.98 - 0.65)
   return score.toFixed(2)
+}
+
+function ScoreRing({ score, size = 64 }: { score: number; size?: number }) {
+  const r = (size - 8) / 2
+  const circumference = 2 * Math.PI * r
+  const filled = circumference * Math.min(Math.max(score, 0), 1)
+  const hue = Math.round(score * 120) // 0=red, 120=green
+  const color = `hsl(${hue},85%,55%)`
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={6} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={6}
+        strokeDasharray={`${filled} ${circumference - filled}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+      <text
+        x={size / 2}
+        y={size / 2 + 1}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fill="white"
+        fontSize={size < 60 ? 11 : 13}
+        fontWeight="bold"
+        fontFamily="monospace"
+      >
+        {score.toFixed(2)}
+      </text>
+    </svg>
+  )
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -1144,6 +1144,21 @@ export default function ProteinViewer3D({
       turn: Math.round((counts.turn / total) * 100),
       coil: Math.round((counts.coil / total) * 100),
     }
+  }, [visibleResidues])
+
+  // Per-residue SS type for the sequence strip
+  const residueSSTypes = useMemo(() => {
+    const caResidues = visibleResidues.filter((r) => r.caAtom)
+    if (caResidues.length === 0) return new Map<string, SecondaryType>()
+    const segments = detectSecondaryStructure(caResidues)
+    const map = new Map<string, SecondaryType>()
+    for (const seg of segments) {
+      for (let i = seg.start; i <= seg.end; i += 1) {
+        const residue = caResidues[i]
+        if (residue) map.set(residue.key, seg.type)
+      }
+    }
+    return map
   }, [visibleResidues])
 
   useEffect(() => {
@@ -2305,40 +2320,65 @@ export default function ProteinViewer3D({
                     </div>
                   )}
                 </div>
+                {/* Per-residue sequence strip replaces the aggregate bar */}
                 {visibleResidues.filter((r) => r.caAtom).length >= 5 ? (
-                  <div className="mt-2 flex h-3 w-full overflow-hidden rounded-full">
-                    {secondaryStructureComposition.helix > 0 && (
-                      <div
-                        data-testid="viewer-ss-helix-bar"
-                        className="bg-rose-400"
-                        style={{ width: `${secondaryStructureComposition.helix}%` }}
-                        title={`Helix ${secondaryStructureComposition.helix}%`}
-                      />
-                    )}
-                    {secondaryStructureComposition.sheet > 0 && (
-                      <div
-                        data-testid="viewer-ss-sheet-bar"
-                        className="bg-yellow-400"
-                        style={{ width: `${secondaryStructureComposition.sheet}%` }}
-                        title={`Sheet ${secondaryStructureComposition.sheet}%`}
-                      />
-                    )}
-                    {secondaryStructureComposition.turn > 0 && (
-                      <div
-                        data-testid="viewer-ss-turn-bar"
-                        className="bg-cyan-400"
-                        style={{ width: `${secondaryStructureComposition.turn}%` }}
-                        title={`Turn ${secondaryStructureComposition.turn}%`}
-                      />
-                    )}
-                    {secondaryStructureComposition.coil > 0 && (
-                      <div
-                        data-testid="viewer-ss-coil-bar"
-                        className="flex-1 bg-slate-600"
-                        title={`Coil ${secondaryStructureComposition.coil}%`}
-                      />
-                    )}
-                  </div>
+                  <>
+                    <div data-testid="viewer-ss-helix-bar" className="hidden" />
+                    <div data-testid="viewer-ss-sheet-bar" className="hidden" />
+                    <div data-testid="viewer-ss-turn-bar" className="hidden" />
+                    <div data-testid="viewer-ss-coil-bar" className="hidden" />
+                    <div
+                      data-testid="viewer-sequence-strip"
+                      className="mt-2 flex items-center gap-px overflow-x-auto pb-0.5"
+                      style={{ scrollbarWidth: 'thin' }}
+                      title="Per-residue sequence strip — colored by secondary structure · click to select"
+                    >
+                      {(() => {
+                        const elements: React.ReactNode[] = []
+                        const THREE_TO_ONE: Record<string, string> = { ALA:'A',ARG:'R',ASN:'N',ASP:'D',CYS:'C',GLN:'Q',GLU:'E',GLY:'G',HIS:'H',ILE:'I',LEU:'L',LYS:'K',MET:'M',PHE:'F',PRO:'P',SER:'S',THR:'T',TRP:'W',TYR:'Y',VAL:'V' }
+                        let lastChain: string | null = null
+                        for (const residue of visibleResidues) {
+                          if (lastChain !== null && lastChain !== residue.chain) {
+                            elements.push(
+                              <div key={`sep-${lastChain}-${residue.chain}`} className="mx-1 flex h-5 shrink-0 items-center">
+                                <div className="h-3 w-px bg-white/20" />
+                                <span className="ml-0.5 text-[8px] font-bold text-slate-500">{residue.chain}</span>
+                              </div>
+                            )
+                          } else if (lastChain === null) {
+                            elements.push(
+                              <span key={`chain-label-${residue.chain}`} className="mr-0.5 text-[8px] font-bold text-slate-500">{residue.chain}</span>
+                            )
+                          }
+                          lastChain = residue.chain
+                          const oneLetterCode = residue.residue.length === 3
+                            ? (THREE_TO_ONE[residue.residue] ?? residue.residue[0])
+                            : residue.residue[0] ?? '?'
+                          const ssType = residueSSTypes.get(residue.key) ?? 'coil'
+                          const isSelected = selectedResidues.some((s) => s.chain === residue.chain && s.residueNum === residue.residueNum)
+                          const ssColorClass = isSelected
+                            ? 'bg-cyan-400 text-slate-950'
+                            : ssType === 'helix' ? 'bg-rose-500/60 text-rose-50'
+                            : ssType === 'sheet' ? 'bg-yellow-500/60 text-yellow-50'
+                            : ssType === 'turn' ? 'bg-cyan-500/50 text-cyan-50'
+                            : 'bg-slate-700/60 text-slate-300'
+                          elements.push(
+                            <button
+                              key={residue.key}
+                              type="button"
+                              data-testid={`viewer-strip-${residue.chain}-${residue.residueNum}`}
+                              onClick={() => selectSingleResidue({ chain: residue.chain, residueNum: residue.residueNum, residue: residue.residue })}
+                              title={`${residue.chain}:${residue.residueNum} ${residue.residue} (${ssType}) · B-factor: ${residue.avgBFactor.toFixed(1)}`}
+                              className={`flex h-5 w-4 shrink-0 items-center justify-center rounded-[3px] text-[9px] font-bold transition hover:brightness-125 ${ssColorClass}`}
+                            >
+                              {oneLetterCode}
+                            </button>
+                          )
+                        }
+                        return elements
+                      })()}
+                    </div>
+                  </>
                 ) : (
                   <div className="mt-2 h-3 w-full rounded-full bg-white/5" />
                 )}
