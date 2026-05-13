@@ -235,6 +235,18 @@ test('take screenshots', async ({ page }) => {
     }
   } catch(e) {}
 
+  // Multi-select using modifier keys on sequence map
+  try {
+    const tokenA1 = page.getByTestId('viewer-sequence-token-A-1')
+    const tokenA2 = page.getByTestId('viewer-sequence-token-A-2')
+    if (await tokenA1.isVisible() && await tokenA2.isVisible()) {
+      await tokenA1.click()
+      await tokenA2.click({ modifiers: ['Shift'] })
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: '/tmp/ss7d-multiselect-shift.png', fullPage: false })
+    }
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()

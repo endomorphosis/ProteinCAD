@@ -1651,6 +1651,20 @@ export default function ProteinViewer3D({
     focusSelectionEntry(selection)
   }
 
+  const handleResidueTokenClick = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    selection: ResidueSelection
+  ) => {
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      const added = toggleResidueSelection(selection)
+      if (added) {
+        focusSelectionEntry(selection)
+      }
+      return
+    }
+    selectSingleResidue(selection)
+  }
+
   const focusHoveredResidue = () => {
     if (!hoverInfo) {
       setAnalysisMessage('Hover over a residue to focus it.')
@@ -2275,7 +2289,7 @@ export default function ProteinViewer3D({
               data-testid="viewer-shortcut-hints"
               className="border-b border-white/10 px-4 pb-3 text-xs text-slate-400"
             >
-              Rotate: drag · Zoom: scroll · Select: click · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap · Y hydrophobicity
+              Rotate: drag · Zoom: scroll · Select: click · Add/remove: Shift/Ctrl-click on strip or map · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap · Y hydrophobicity
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2399,8 +2413,14 @@ export default function ProteinViewer3D({
                               key={residue.key}
                               type="button"
                               data-testid={`viewer-strip-${residue.chain}-${residue.residueNum}`}
-                              onClick={() => selectSingleResidue({ chain: residue.chain, residueNum: residue.residueNum, residue: residue.residue })}
-                              title={`${residue.chain}:${residue.residueNum} ${residue.residue} (${ssType}) · B-factor: ${residue.avgBFactor.toFixed(1)}`}
+                              onClick={(event) =>
+                                handleResidueTokenClick(event, {
+                                  chain: residue.chain,
+                                  residueNum: residue.residueNum,
+                                  residue: residue.residue,
+                                })
+                              }
+                              title={`${residue.chain}:${residue.residueNum} ${residue.residue} (${ssType}) · B-factor: ${residue.avgBFactor.toFixed(1)} · Shift/Ctrl-click to add/remove`}
                               className={`flex h-5 w-4 shrink-0 items-center justify-center rounded-[3px] text-[9px] font-bold transition hover:brightness-125 ${ssColorClass}`}
                             >
                               {oneLetterCode}
@@ -3635,15 +3655,15 @@ export default function ProteinViewer3D({
                         key={label}
                         type="button"
                         data-testid={`viewer-sequence-token-${entry.chain}-${entry.residueNum}`}
-                        onClick={() =>
-                          selectSingleResidue({
+                        onClick={(event) =>
+                          handleResidueTokenClick(event, {
                             chain: entry.chain,
                             residueNum: entry.residueNum,
                             residue: entry.residue,
                           })
                         }
                         className={`rounded-2xl border px-2.5 py-2 text-left transition ${toneClass}`}
-                        title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}${isContact ? ' · within contact radius' : ''}`}
+                        title={`${label} ${entry.residue} · B-factor ${entry.avgBFactor.toFixed(1)}${isContact ? ' · within contact radius' : ''} · Shift/Ctrl-click to add/remove`}
                       >
                         <div className="text-[11px] font-semibold uppercase tracking-wide">{label}</div>
                         <div className="mt-1 flex items-center gap-1">
