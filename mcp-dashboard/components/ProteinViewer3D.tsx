@@ -1768,6 +1768,38 @@ export default function ProteinViewer3D({
     )
   }
 
+  const selectContactNetwork = () => {
+    if (!selectionSummary) {
+      setAnalysisMessage('Select a residue first to build a contact network.')
+      return
+    }
+    if (contactNetworkKeys.size === 0) {
+      setAnalysisMessage('No neighboring residues found within the current radius.')
+      return
+    }
+
+    const primarySelection: ResidueSelection = {
+      chain: selectionSummary.primary.chain,
+      residueNum: selectionSummary.primary.residueNum,
+      residue: selectionSummary.primary.residue,
+    }
+    const neighbors = parsed.residues
+      .filter((residue) => contactNetworkKeys.has(residue.key))
+      .map((residue) => ({
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+      }))
+    const nextSelection = [primarySelection, ...neighbors]
+    applySelection(
+      nextSelection,
+      `Selected contact network around ${primarySelection.chain}:${primarySelection.residueNum} (${neighbors.length} neighbor${
+        neighbors.length === 1 ? '' : 's'
+      }).`
+    )
+    focusSelectionEntry(primarySelection)
+  }
+
   const focusOnResidue = () => {
     const query = focusResidue.trim()
     if (!query) {
@@ -3625,10 +3657,20 @@ export default function ProteinViewer3D({
                   <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-blue-500/50" />Positive</span>
                   <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-green-500/50" />Gly</span>
                   {contactNetworkKeys.size > 0 && (
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
-                      Contact
-                    </span>
+                    <>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />
+                        Contact
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="viewer-select-contact-network"
+                        onClick={selectContactNetwork}
+                        className="rounded-full border border-violet-300/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-100 transition hover:bg-violet-500/20"
+                      >
+                        Select contact network ({contactNetworkKeys.size})
+                      </button>
+                    </>
                   )}
                 </div>
                 <div className="mt-4 max-h-56 overflow-y-auto pr-1">

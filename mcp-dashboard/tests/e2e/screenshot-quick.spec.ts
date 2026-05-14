@@ -247,6 +247,16 @@ test('take screenshots', async ({ page }) => {
     }
   } catch(e) {}
 
+  // Select full contact network from sequence map quick action
+  try {
+    const contactQuickAction = page.getByTestId('viewer-select-contact-network')
+    if (await contactQuickAction.isVisible()) {
+      await contactQuickAction.click()
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: '/tmp/ss7e-contact-network-selection.png', fullPage: false })
+    }
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()
