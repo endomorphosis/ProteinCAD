@@ -1436,6 +1436,29 @@ export default function ProteinViewer3D({
     setAnalysisMessage(copied ? `Copied selected residues ${text}.` : `Selected residues ready to copy: ${text}.`)
   }
 
+  const copySelectedFasta = async () => {
+    if (!sequence || !sequence.trim()) {
+      setAnalysisMessage('Sequence is not available for FASTA export.')
+      return
+    }
+
+    const positions = new Set(selectedResidues.map((residue) => residue.residueNum))
+    const fasta = Array.from(positions)
+      .sort((left, right) => left - right)
+      .filter((position) => position >= 1 && position <= sequence.length)
+      .map((position) => sequence[position - 1])
+      .join('')
+
+    if (!fasta) {
+      setAnalysisMessage('Select residues with valid sequence positions before exporting FASTA.')
+      return
+    }
+
+    const header = `>Selection_${fasta.length}aa`
+    const copied = await copyTextToClipboard(`${header}\n${fasta}`)
+    setAnalysisMessage(copied ? `Copied FASTA for ${fasta.length} selected residue${fasta.length === 1 ? '' : 's'}.` : `FASTA ready to copy for ${fasta.length} selected residue${fasta.length === 1 ? '' : 's'}.`)
+  }
+
   const selectFarthestPair = () => {
     if (!selectionAnalytics?.farthestPair) {
       setAnalysisMessage('Select at least two residues before using the farthest pair.')
@@ -2186,7 +2209,7 @@ export default function ProteinViewer3D({
           <div className="min-w-0 border-b border-white/10 lg:flex lg:min-h-0 lg:flex-col lg:border-b-0 lg:border-r">
             <div
               data-testid="viewer-controls-toolbar"
-              className="flex items-center gap-2 overflow-x-auto border-b border-white/10 px-4 py-3 pb-4"
+              className="flex items-center gap-1.5 overflow-x-auto border-b border-white/10 px-4 py-3 pb-4"
             >
               {([
                 ['ribbon', 'Ribbon'],
@@ -2198,10 +2221,10 @@ export default function ProteinViewer3D({
                 <button
                   key={mode}
                   onClick={() => setRenderMode(mode)}
-                  className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
-                    renderMode === mode
-                      ? 'bg-cyan-400 text-slate-950'
-                      : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                    className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
+                      renderMode === mode
+                        ? 'bg-cyan-400 text-slate-950'
+                        : 'bg-white/5 text-slate-300 hover:bg-white/10'
                   }`}
                 >
                   {label}
@@ -2209,21 +2232,22 @@ export default function ProteinViewer3D({
               ))}
 
               <button
+                data-testid="viewer-heatmap"
                 onClick={() => setShowHeatmap((prev) => !prev)}
-                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
                   showHeatmap
                     ? 'bg-amber-400 text-slate-950'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
                 }`}
                 title="B-factor heatmap"
               >
-                B-factor heatmap
+                Heatmap
               </button>
 
               <button
                 data-testid="viewer-hydrophobicity"
                 onClick={() => setShowHydrophobicity((prev) => !prev)}
-                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
                   showHydrophobicity
                     ? 'bg-orange-400 text-slate-950'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -2236,19 +2260,19 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-color-by-chain"
                 onClick={() => setColorByChain((prev) => !prev)}
-                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
                   colorByChain
                     ? 'bg-emerald-500 text-white'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
                 }`}
                 title="Toggle chain-based coloring"
               >
-                Chain colors
+                Chains
               </button>
 
               <button
                 onClick={resetView}
-                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:text-sm"
               >
                 Reset view
               </button>
@@ -2256,27 +2280,27 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-focus-selection"
                 onClick={focusSelection}
-                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:text-sm"
               >
-                Center selection
+                Center
               </button>
 
               <button
                 data-testid="viewer-auto-rotate"
                 onClick={() => setAutoRotate((prev) => !prev)}
-                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
                   autoRotate
                     ? 'bg-emerald-400 text-slate-950'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
                 }`}
               >
-                {autoRotate ? 'Auto-rotate on' : 'Auto-rotate off'}
+                {autoRotate ? 'Rotate on' : 'Rotate off'}
               </button>
 
               <button
                 data-testid="viewer-snapshot"
                 onClick={downloadSnapshot}
-                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:text-sm"
               >
                 Save PNG
               </button>
@@ -2284,15 +2308,15 @@ export default function ProteinViewer3D({
               <button
                 data-testid="viewer-download-pdb"
                 onClick={downloadPDB}
-                className="shrink-0 rounded-full bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+                className="shrink-0 rounded-full bg-white/5 px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:text-sm"
               >
-                Download PDB
+                PDB
               </button>
 
               <button
                 data-testid="viewer-show-labels"
                 onClick={() => setShowLabels((prev) => !prev)}
-                className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium transition ${
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
                   showLabels
                     ? 'bg-cyan-400/20 text-cyan-100'
                     : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -2321,7 +2345,7 @@ export default function ProteinViewer3D({
               data-testid="viewer-shortcut-hints"
               className="border-b border-white/10 px-4 pb-3 text-xs text-slate-400"
             >
-              Rotate: drag · Zoom: scroll · Select: click · Add/remove: Shift/Ctrl-click on strip or map · Hover: inspect residue · Shortcuts: / focus · F fullscreen · C chain colors · L labels · H heatmap · Y hydrophobicity
+              Rotate: drag · Zoom: scroll · Select: click · Shift/Ctrl-click: add/remove · Hover: inspect · / focus · F fullscreen · C chains · L labels · H heatmap · Y hydrophobicity
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2660,17 +2684,7 @@ export default function ProteinViewer3D({
                       <button
                         type="button"
                         data-testid="viewer-selection-spotlight-fasta"
-                        onClick={() => {
-                          const positions = new Set(selectedResidues.map((r) => r.residueNum))
-                          const fasta = Array.from(positions)
-                            .sort((a, b) => a - b)
-                            .filter((pos) => pos >= 1 && pos <= sequence.length)
-                            .map((pos) => sequence[pos - 1])
-                            .join('')
-                          if (!fasta) return
-                          const header = `>Selection_${fasta.length}aa`
-                          copyTextToClipboard(`${header}\n${fasta}`)
-                        }}
+                        onClick={copySelectedFasta}
                         className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-300/15"
                       >
                         Copy FASTA
@@ -3735,14 +3749,54 @@ export default function ProteinViewer3D({
             )}
 
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Selected residues</h4>
-                <button
-                  onClick={clearSelection}
-                  className="text-xs font-medium text-slate-400 transition hover:text-white"
-                >
-                  Clear
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedResidues.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        data-testid="viewer-selected-center"
+                        onClick={focusSelection}
+                        className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-100 transition hover:bg-white/15"
+                      >
+                        Center
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="viewer-selected-copy-positions"
+                        onClick={copySelectedPositions}
+                        className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-100 transition hover:bg-white/15"
+                      >
+                        Copy positions
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="viewer-selected-copy-residues"
+                        onClick={copySelectedResidues}
+                        className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-100 transition hover:bg-white/15"
+                      >
+                        Copy residues
+                      </button>
+                      {sequence && (
+                        <button
+                          type="button"
+                          data-testid="viewer-selected-copy-fasta"
+                          onClick={copySelectedFasta}
+                          className="rounded-full border border-emerald-200/20 bg-emerald-300/10 px-2.5 py-1 text-[11px] font-medium text-emerald-50 transition hover:bg-emerald-300/15"
+                        >
+                          Copy FASTA
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <button
+                    onClick={clearSelection}
+                    className="text-xs font-medium text-slate-400 transition hover:text-white"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
               <div className="mt-3 max-h-40 overflow-y-auto pr-1">
                 <div className="flex flex-wrap gap-2">

@@ -313,7 +313,7 @@ test.describe('Results viewer', () => {
     await page.getByTestId('viewer-focus-selection').click()
     await expect(page.getByText(/Centered 1 selected residue/i)).toBeVisible()
     await page.getByTestId('viewer-auto-rotate').click()
-    await expect(page.getByTestId('viewer-auto-rotate')).toHaveText(/Auto-rotate on/i)
+    await expect(page.getByTestId('viewer-auto-rotate')).toHaveText(/Rotate on/i)
 
     const downloadPromise = page.waitForEvent('download')
     await page.getByTestId('viewer-snapshot').click()
@@ -529,7 +529,7 @@ test.describe('Results viewer', () => {
 
     const toolbar = page.getByTestId('viewer-controls-toolbar')
     const buttonTops = await Promise.all(
-      ['Ribbon', 'Cartoon', 'Ball & Stick', 'Stick', 'B-factor heatmap', 'Reset view', 'Center selection', 'Auto-rotate off', 'Save PNG'].map(
+      ['Ribbon', 'Cartoon', 'Ball & Stick', 'Stick', 'Heatmap', 'Reset view', 'Center', 'Rotate off', 'Save PNG'].map(
         async (name) => {
           const box = await toolbar.getByRole('button', { name, exact: true }).boundingBox()
           return Math.round(box?.y || 0)
@@ -552,10 +552,10 @@ test.describe('Results viewer', () => {
 
     // Heatmap legend appears when heatmap is on, hidden when off
     await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
-    await page.getByRole('button', { name: 'B-factor heatmap', exact: true }).click()
+    await page.getByRole('button', { name: 'Heatmap', exact: true }).click()
     await expect(page.getByTestId('viewer-heatmap-legend')).toBeVisible()
     await expect(page.getByTestId('viewer-heatmap-legend')).toContainText('B-factor scale')
-    await page.getByRole('button', { name: 'B-factor heatmap', exact: true }).click()
+    await page.getByRole('button', { name: 'Heatmap', exact: true }).click()
     await expect(page.getByTestId('viewer-heatmap-legend')).toBeHidden()
 
     // Keyboard shortcuts toggle key viewer modes and focus the residue input.
@@ -586,6 +586,18 @@ test.describe('Results viewer', () => {
     // Select all & invert selection helpers
     await page.getByTestId('viewer-select-all').click()
     await expect(page.getByText(/Selected all 4 visible residues/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-selected-copy-residues')).toBeVisible()
+    await expect(page.getByTestId('viewer-selected-copy-positions')).toBeVisible()
+    await expect(page.getByTestId('viewer-selected-copy-fasta')).toBeVisible()
+    await page.getByTestId('viewer-selected-copy-residues').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/A:1 ALA/)
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/B:10 TYR/)
+    await page.getByTestId('viewer-selected-copy-positions').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toBe('1,2,9,10')
+    await page.getByTestId('viewer-selected-copy-fasta').click()
+    await expect.poll(async () => page.evaluate(() => (window as any).__copiedText)).toMatch(/^>Selection_4aa\nACKL$/)
+    await page.getByTestId('viewer-selected-center').click()
+    await expect(page.getByText(/Centered 4 selected residues/i)).toBeVisible()
     await page.getByTestId('viewer-invert-selection').click()
     await expect(page.getByText(/Nothing left after inverting/i)).toBeVisible()
 

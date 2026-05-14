@@ -257,6 +257,16 @@ test('take screenshots', async ({ page }) => {
     }
   } catch(e) {}
 
+  // Capture selected residues quick actions in the sidebar
+  try {
+    const selectedResidues = page.getByTestId('viewer-selected-residues')
+    if (await selectedResidues.isVisible()) {
+      await selectedResidues.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: '/tmp/ss7f-selection-actions.png', fullPage: false })
+    }
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()
