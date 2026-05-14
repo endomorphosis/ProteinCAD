@@ -2312,7 +2312,7 @@ export default function ProteinViewer3D({
                 }`}
                 title={isFullscreen ? 'Restore split view' : 'Expand 3D canvas'}
               >
-                {isFullscreen ? '⊡ Restore' : '⊠ Expand'}
+                {isFullscreen ? 'Restore' : 'Expand'}
               </button>
 
             </div>
