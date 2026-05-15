@@ -310,6 +310,15 @@ test.describe('Results viewer', () => {
     await expect(page.getByTestId('viewer-selected-atom-count')).toHaveText('2')
     await expect(page.getByTestId('viewer-selected-sequence-residue')).toHaveText(job.input.sequence[1])
 
+    await page.getByTestId('viewer-focus-residue').fill('a:1')
+    await page.getByTestId('viewer-focus-button').click()
+    await expect(page.getByText(/Focused on residue A:1/i)).toBeVisible()
+    await expect(page.getByTestId('viewer-selection-spotlight-primary')).toHaveText('A:1 ALA')
+
+    await page.getByTestId('viewer-focus-residue').fill('A:3-1')
+    await page.getByTestId('viewer-focus-button').click()
+    await expect(page.getByText(/Use an ascending residue range like A:1-3/i)).toBeVisible()
+
     await page.getByTestId('viewer-focus-selection').click()
     await expect(page.getByText(/Centered 1 selected residue/i)).toBeVisible()
     await page.getByTestId('viewer-auto-rotate').click()

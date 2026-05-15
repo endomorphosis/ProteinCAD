@@ -1246,7 +1246,7 @@ export default function ProteinViewer3D({
         event.preventDefault()
         focusResidueInputRef.current?.focus()
         focusResidueInputRef.current?.select()
-        setAnalysisMessage('Focused residue search. Type a value like A:42 and press Focus.')
+        setAnalysisMessage('Focused residue search. Type a value like A:42 and press Go.')
         return
       }
 
@@ -1945,6 +1945,8 @@ export default function ProteinViewer3D({
         setAnalysisMessage(`No residues found in range ${query}.`)
         return
       }
+      setAnalysisMessage(`Use an ascending residue range like ${rangeChain ? `${rangeChain}:` : ''}${endNum}-${startNum}.`)
+      return
     }
 
     let chain = selectedChain !== 'all' ? selectedChain : ''
@@ -1952,7 +1954,7 @@ export default function ProteinViewer3D({
 
     if (query.includes(':')) {
       const [queryChain, residueToken] = query.split(':')
-      chain = queryChain.trim() || chain
+      chain = (queryChain.trim().charAt(0).toUpperCase() || chain).toUpperCase()
       residueNum = Number.parseInt(residueToken.trim(), 10)
     } else {
       residueNum = Number.parseInt(query, 10)
@@ -2145,7 +2147,16 @@ export default function ProteinViewer3D({
           residue: String(data.residue || 'UNK'),
         }
 
-        toggleResidueSelection(selection, { silent: true })
+        if (event.shiftKey || event.ctrlKey || event.metaKey) {
+          const added = toggleResidueSelection(selection, { silent: true })
+          if (added) {
+            focusSelectionEntry(selection)
+          }
+          return
+        }
+
+        applySelection([selection], `Selected residue ${selection.chain}:${selection.residueNum}.`)
+        focusSelectionEntry(selection)
       }
       renderer.domElement.addEventListener('click', handleClick)
 
