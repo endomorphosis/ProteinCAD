@@ -1,6 +1,6 @@
 import { test, type Page } from '@playwright/test'
 
-const JOB_AGE_MS = 2 * 60_000
+const MOCK_JOB_AGE_MS = 2 * 60_000
 const SCREENSHOT_TEST_TIMEOUT_MS = 120_000
 const WAIT_SHORT_MS = 300
 const WAIT_MEDIUM_MS = 600
@@ -120,7 +120,7 @@ END
 const JOB = {
   job_id: 'job_ss0',
   status: 'completed',
-  created_at: new Date(Date.now() - JOB_AGE_MS).toISOString(),
+  created_at: new Date(Date.now() - MOCK_JOB_AGE_MS).toISOString(),
   updated_at: new Date().toISOString(),
   job_name: 'Screenshot Job',
   input: { sequence: 'ALIEKALE', num_designs: 2 },

@@ -1,5 +1,7 @@
 import { test } from '@playwright/test'
 
+const MOCK_JOB_AGE_MS = 2 * 60_000
+
 // 18-residue alpha-helix (chain A) + 8-residue beta-strand (chain B) for realistic 3D preview
 const PDB = `ATOM      1  N   ALA A   1      13.500  13.700   1.100  1.00 12.00           N
 ATOM      2  CA  ALA A   1      14.300  14.000   1.500  1.00 12.00           C
@@ -113,7 +115,7 @@ END
 const JOB = {
   job_id: 'job_ss0',
   status: 'completed',
-  created_at: new Date(Date.now() - 120000).toISOString(),
+  created_at: new Date(Date.now() - MOCK_JOB_AGE_MS).toISOString(),
   updated_at: new Date().toISOString(),
   job_name: 'Screenshot Job',
   input: { sequence: 'ALIEKALE', num_designs: 2 },
