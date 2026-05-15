@@ -680,7 +680,8 @@ function buildMolecule(
   colorByChain: boolean,
   selectedChain: string,
   selectedResidues: ResidueSelection[],
-  showHydrophobicity: boolean
+  showHydrophobicity: boolean,
+  colorByAAClass: boolean
 ): BuildResult {
   const group = new THREE.Group()
   const selectedKeys = new Set(selectedResidues.map((residue) => residueKey(residue.chain, residue.residueNum)))
@@ -737,6 +738,42 @@ function buildMolecule(
         new THREE.MeshPhongMaterial({
           color: hydroColor,
           shininess: 40,
+          transparent: true,
+          opacity,
+          depthWrite: !isSurfaceMode,
+        })
+      )
+      sphere.position.copy(center)
+      sphere.userData = {
+        kind: 'residue',
+        chain: residue.chain,
+        residueNum: residue.residueNum,
+        residue: residue.residue,
+      }
+      group.add(sphere)
+    }
+  }
+
+  // AA-class coloring overlay: discrete physicochemical class colors on Cα spheres
+  if (colorByAAClass && !heatmap && !showHydrophobicity) {
+    const THREE_TO_ONE_AACLASS: Record<string, string> = { ALA:'A',ARG:'R',ASN:'N',ASP:'D',CYS:'C',GLN:'Q',GLU:'E',GLY:'G',HIS:'H',ILE:'I',LEU:'L',LYS:'K',MET:'M',PHE:'F',PRO:'P',SER:'S',THR:'T',TRP:'W',TYR:'Y',VAL:'V' }
+    const AA_CLASS_HEX: Record<string, number> = { hydrophobic: 0x94a3b8, polar: 0x2dd4bf, negative: 0xfb7185, positive: 0x60a5fa, special: 0x86efac }
+    const AA_PHYS_MAP: Record<string, string> = { A:'hydrophobic',V:'hydrophobic',L:'hydrophobic',I:'hydrophobic',M:'hydrophobic',F:'hydrophobic',W:'hydrophobic',P:'hydrophobic',S:'polar',T:'polar',C:'polar',Y:'polar',N:'polar',Q:'polar',D:'negative',E:'negative',K:'positive',R:'positive',H:'positive',G:'special' }
+    const isSurfaceMode = mode === 'surface'
+    for (const residue of visibleResidues) {
+      if (!residue.caAtom) continue
+      const center = getAtomPosition(residue.caAtom)
+      const one = THREE_TO_ONE_AACLASS[residue.residue.toUpperCase()] ?? residue.residue[0] ?? ''
+      const cls = AA_PHYS_MAP[one.toUpperCase()] ?? 'hydrophobic'
+      const colorHex = AA_CLASS_HEX[cls] ?? 0x9ca3af
+      const isSelected = selectedKeys.has(residue.key)
+      const sphereRadius = isSurfaceMode ? 1.65 : 0.50
+      const opacity = isSurfaceMode ? 0.76 : (isSelected ? 0.96 : 0.88)
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(sphereRadius, 14, 10),
+        new THREE.MeshPhongMaterial({
+          color: new THREE.Color(colorHex),
+          shininess: 45,
           transparent: true,
           opacity,
           depthWrite: !isSurfaceMode,
@@ -857,6 +894,7 @@ export default function ProteinViewer3D({
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [colorByChain, setColorByChain] = useState(true)
   const [showHydrophobicity, setShowHydrophobicity] = useState(false)
+  const [colorByAAClass, setColorByAAClass] = useState(false)
   const [selectedResidues, setSelectedResidues] = useState<ResidueSelection[]>([])
   const [positionsText, setPositionsText] = useState('')
   const [numVariants, setNumVariants] = useState(DEFAULT_NUM_VARIANTS)
@@ -1234,6 +1272,10 @@ export default function ProteinViewer3D({
         case 'y':
           setShowHydrophobicity((prev) => !prev)
           setAnalysisMessage('Toggled hydrophobicity coloring.')
+          break
+        case 'a':
+          setColorByAAClass((prev) => !prev)
+          setAnalysisMessage('Toggled amino-acid class coloring.')
           break
         default:
           break
@@ -1823,11 +1865,86 @@ export default function ProteinViewer3D({
     focusSelectionEntry(primarySelection)
   }
 
+  const interfaceContactRadius = 8 // Å — default inter-chain contact cutoff
+
+  const selectBindingInterface = () => {
+    if (parsed.chains.length < 2) {
+      setAnalysisMessage('Need at least 2 chains to detect a binding interface.')
+      return
+    }
+
+    // Build a map from chain → array of Cα positions
+    const chainCenters = new Map<string, Array<{ key: string; center: THREE.Vector3; chain: string; residueNum: number; residue: string }>>()
+    for (const residue of parsed.residues) {
+      const center = residue.caAtom ? getAtomPosition(residue.caAtom) : residue.center
+      const bucket = chainCenters.get(residue.chain) || []
+      bucket.push({ key: residue.key, center, chain: residue.chain, residueNum: residue.residueNum, residue: residue.residue })
+      chainCenters.set(residue.chain, bucket)
+    }
+
+    const interfaceSet = new Set<string>()
+    const allChains = Array.from(chainCenters.keys())
+
+    for (let i = 0; i < allChains.length; i += 1) {
+      const chainA = allChains[i]
+      const residuesA = chainCenters.get(chainA) || []
+      for (let j = i + 1; j < allChains.length; j += 1) {
+        const chainB = allChains[j]
+        const residuesB = chainCenters.get(chainB) || []
+        for (const rA of residuesA) {
+          for (const rB of residuesB) {
+            if (rA.center.distanceTo(rB.center) <= interfaceContactRadius) {
+              interfaceSet.add(rA.key)
+              interfaceSet.add(rB.key)
+            }
+          }
+        }
+      }
+    }
+
+    if (interfaceSet.size === 0) {
+      setAnalysisMessage(`No inter-chain contacts found within ${interfaceContactRadius} Å.`)
+      return
+    }
+
+    const interfaceResidues: ResidueSelection[] = parsed.residues
+      .filter((r) => interfaceSet.has(r.key))
+      .map((r) => ({ chain: r.chain, residueNum: r.residueNum, residue: r.residue }))
+
+    applySelection(
+      interfaceResidues,
+      `Selected ${interfaceResidues.length} binding interface residue${interfaceResidues.length === 1 ? '' : 's'} across ${parsed.chains.length} chains (≤${interfaceContactRadius} Å).`
+    )
+  }
+
   const focusOnResidue = () => {
     const query = focusResidue.trim()
     if (!query) {
-      setAnalysisMessage('Enter a residue number or chain:number to focus the camera.')
+      setAnalysisMessage('Enter a residue number, range (e.g. A:1-20), or chain:number to focus.')
       return
+    }
+
+    // Range selection: detect "A:1-20" or "1-20" format
+    const rangeMatch = query.match(/^([A-Za-z]?):?(\d+)-(\d+)$/)
+    if (rangeMatch) {
+      const rangeChain = rangeMatch[1] ? rangeMatch[1].toUpperCase() : (selectedChain !== 'all' ? selectedChain : '')
+      const startNum = Number.parseInt(rangeMatch[2], 10)
+      const endNum = Number.parseInt(rangeMatch[3], 10)
+      if (startNum <= endNum) {
+        const rangeResidues = parsed.residues
+          .filter((r) => (!rangeChain || r.chain === rangeChain) && r.residueNum >= startNum && r.residueNum <= endNum)
+          .map((r) => ({ chain: r.chain, residueNum: r.residueNum, residue: r.residue }))
+        if (rangeResidues.length > 0) {
+          applySelection(
+            rangeResidues,
+            `Selected ${rangeResidues.length} residue${rangeResidues.length === 1 ? '' : 's'} in range ${rangeChain ? rangeChain + ':' : ''}${startNum}–${endNum}.`
+          )
+          setFocusResidue('')
+          return
+        }
+        setAnalysisMessage(`No residues found in range ${query}.`)
+        return
+      }
     }
 
     let chain = selectedChain !== 'all' ? selectedChain : ''
@@ -1999,7 +2116,8 @@ export default function ProteinViewer3D({
         colorByChain,
         selectedChain,
         selectedResidues,
-        showHydrophobicity
+        showHydrophobicity,
+        colorByAAClass
       )
       residueCentersRef.current = residueCenters
       moleculeRef.current = group
@@ -2147,6 +2265,7 @@ export default function ProteinViewer3D({
     parsed,
     renderMode,
     colorByChain,
+    colorByAAClass,
     selectedChain,
     selectedResidues,
     showHeatmap,
@@ -2258,6 +2377,19 @@ export default function ProteinViewer3D({
               </button>
 
               <button
+                data-testid="viewer-color-by-aa-class"
+                onClick={() => setColorByAAClass((prev) => !prev)}
+                className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
+                  colorByAAClass
+                    ? 'bg-violet-400 text-slate-950'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+                title="Color Cα spheres by amino-acid physicochemical class (A to toggle)"
+              >
+                AA Class
+              </button>
+
+              <button
                 data-testid="viewer-color-by-chain"
                 onClick={() => setColorByChain((prev) => !prev)}
                 className={`shrink-0 rounded-full px-2.5 py-2 text-xs font-medium transition sm:text-sm ${
@@ -2345,7 +2477,7 @@ export default function ProteinViewer3D({
               data-testid="viewer-shortcut-hints"
               className="border-b border-white/10 px-4 pb-3 text-xs text-slate-400"
             >
-              Rotate: drag · Zoom: scroll · Select: click · Shift/Ctrl-click: add/remove · Hover: inspect · / focus · F fullscreen · C chains · L labels · H heatmap · Y hydrophobicity
+              Rotate: drag · Zoom: scroll · Select: click · Shift/Ctrl-click: add/remove · Hover: inspect · / focus · F fullscreen · C chains · L labels · H heatmap · Y hydrophobicity · A AA class
             </div>
 
             <div className="grid gap-3 border-b border-white/10 px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3014,7 +3146,7 @@ export default function ProteinViewer3D({
                   )}
 
                   {/* Chain color legend overlay */}
-                  {colorByChain && !showHeatmap && !showHydrophobicity && parsed.chains.length > 1 && (
+                  {colorByChain && !showHeatmap && !showHydrophobicity && !colorByAAClass && parsed.chains.length > 1 && (
                     <div
                       data-testid="viewer-chain-legend-overlay"
                       className="pointer-events-none absolute bottom-4 right-4 rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-xs backdrop-blur-sm"
@@ -3031,6 +3163,40 @@ export default function ProteinViewer3D({
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* AA class legend overlay */}
+                  {colorByAAClass && !showHeatmap && !showHydrophobicity && (
+                    <div
+                      data-testid="viewer-aa-class-legend-overlay"
+                      className="pointer-events-none absolute bottom-4 right-4 rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-xs backdrop-blur-sm"
+                    >
+                      <div className="mb-1.5 font-semibold uppercase tracking-wide text-slate-400">AA Class</div>
+                      <div className="space-y-1">
+                        {[
+                          { label: 'Hydrophobic', color: '#94a3b8' },
+                          { label: 'Polar', color: '#2dd4bf' },
+                          { label: 'Negative', color: '#fb7185' },
+                          { label: 'Positive', color: '#60a5fa' },
+                          { label: 'Gly / Pro', color: '#86efac' },
+                        ].map(({ label, color }) => (
+                          <div key={label} className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                            <span className="text-slate-200">{label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selection count badge */}
+                  {selectedResidues.length > 0 && (
+                    <div
+                      data-testid="viewer-selection-count-badge"
+                      className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-cyan-400/30 bg-slate-950/80 px-4 py-1.5 text-xs font-semibold text-cyan-200 backdrop-blur-sm"
+                    >
+                      {selectedResidues.length} residue{selectedResidues.length === 1 ? '' : 's'} selected
                     </div>
                   )}
 
@@ -3242,7 +3408,7 @@ export default function ProteinViewer3D({
                 </label>
 
                 <label className="block text-sm text-slate-300">
-                  Focus residue
+                  Focus / Select residue
                   <div className="mt-2 flex gap-2">
                     <input
                       ref={focusResidueInputRef}
@@ -3255,7 +3421,7 @@ export default function ProteinViewer3D({
                           focusOnResidue()
                         }
                       }}
-                      placeholder="e.g. 42 or A:42"
+                      placeholder="e.g. 42, A:42, or A:1-20"
                       className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
                     />
                     <button
@@ -3263,9 +3429,10 @@ export default function ProteinViewer3D({
                       onClick={focusOnResidue}
                       className="rounded-xl bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
                     >
-                      Focus
+                      Go
                     </button>
                   </div>
+                  <p className="mt-1 text-[11px] text-slate-500">Range: A:1-20 selects all residues in that range</p>
                 </label>
 
                 <div className="grid gap-2 sm:grid-cols-3">
@@ -3298,6 +3465,17 @@ export default function ProteinViewer3D({
                     Copy residues
                   </button>
                 </div>
+
+                {parsed.chains.length >= 2 && (
+                  <button
+                    data-testid="viewer-interface-contacts"
+                    onClick={selectBindingInterface}
+                    className="mt-2 w-full rounded-xl border border-violet-400/25 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-100 transition hover:bg-violet-500/20"
+                    title={`Select all residues within ${interfaceContactRadius} Å of a different chain`}
+                  >
+                    Binding interface contacts ({parsed.chains.join('/')})
+                  </button>
+                )}
 
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
@@ -3950,6 +4128,21 @@ export default function ProteinViewer3D({
                     </div>
                     <p className="pt-1 text-xs text-slate-500">
                       Eisenberg scale: blue = hydrophilic, orange = hydrophobic. Press Y to toggle.
+                    </p>
+                  </>
+                ) : colorByAAClass && !showHeatmap ? (
+                  <>
+                    {[
+                      { label: 'Hydrophobic', color: '#94a3b8' },
+                      { label: 'Polar', color: '#2dd4bf' },
+                      { label: 'Negative (Asp/Glu)', color: '#fb7185' },
+                      { label: 'Positive (Lys/Arg/His)', color: '#60a5fa' },
+                      { label: 'Gly / Pro', color: '#86efac' },
+                    ].map(({ label, color }) => (
+                      <LegendItem key={label} label={label} color={new THREE.Color(color)} />
+                    ))}
+                    <p className="pt-1 text-xs text-slate-500">
+                      Physicochemical class coloring on Cα spheres. Press A to toggle.
                     </p>
                   </>
                 ) : colorByChain && !showHeatmap && (renderMode === 'ribbon' || renderMode === 'cartoon') ? (

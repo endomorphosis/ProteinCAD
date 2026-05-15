@@ -267,6 +267,51 @@ test('take screenshots', async ({ page }) => {
     }
   } catch(e) {}
 
+  // Test new: AA class coloring toggle
+  try {
+    const aaClassBtn = page.getByTestId('viewer-color-by-aa-class')
+    if (await aaClassBtn.isVisible()) {
+      await aaClassBtn.click()
+      await page.waitForTimeout(800)
+      await page.screenshot({ path: '/tmp/ss8-aa-class-on.png', fullPage: false })
+      // Check that the AA class legend overlay appears
+      const aaLegend = page.getByTestId('viewer-aa-class-legend-overlay')
+      if (await aaLegend.isVisible()) {
+        await page.screenshot({ path: '/tmp/ss8b-aa-class-legend.png', fullPage: false })
+      }
+      // Turn it off again
+      await aaClassBtn.click()
+      await page.waitForTimeout(400)
+    }
+  } catch(e) {}
+
+  // Test new: binding interface contacts button
+  try {
+    const interfaceBtn = page.getByTestId('viewer-interface-contacts')
+    if (await interfaceBtn.isVisible()) {
+      await interfaceBtn.click()
+      await page.waitForTimeout(600)
+      await page.screenshot({ path: '/tmp/ss9-interface-contacts.png', fullPage: false })
+      // Also check selection count badge
+      const badge = page.getByTestId('viewer-selection-count-badge')
+      if (await badge.isVisible()) {
+        await page.screenshot({ path: '/tmp/ss9b-selection-badge.png', fullPage: false })
+      }
+    }
+  } catch(e) {}
+
+  // Test new: range selection via focus input
+  try {
+    const focusInput = page.getByTestId('viewer-focus-residue')
+    const focusBtn = page.getByTestId('viewer-focus-button')
+    if (await focusInput.isVisible()) {
+      await focusInput.fill('A:1-5')
+      await focusBtn.click()
+      await page.waitForTimeout(600)
+      await page.screenshot({ path: '/tmp/ss9c-range-select.png', fullPage: false })
+    }
+  } catch(e) {}
+
   // Close viewer
   try {
     await page.getByTestId('close-3d-viewer').click()
@@ -283,7 +328,7 @@ test('take screenshots', async ({ page }) => {
     if (await aaBar.isVisible()) {
       await aaBar.scrollIntoViewIfNeeded()
       await page.waitForTimeout(300)
-      await page.screenshot({ path: '/tmp/ss8-design-aa-bar.png', fullPage: false })
+      await page.screenshot({ path: '/tmp/ss10-design-aa-bar.png', fullPage: false })
     }
   } catch(e) {}
 })
