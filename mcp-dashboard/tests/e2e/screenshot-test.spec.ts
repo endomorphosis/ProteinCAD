@@ -1,5 +1,12 @@
 import { test, type Page } from '@playwright/test'
 
+const JOB_AGE_MS = 2 * 60_000
+const SCREENSHOT_TEST_TIMEOUT_MS = 120_000
+const WAIT_SHORT_MS = 300
+const WAIT_MEDIUM_MS = 600
+const WAIT_LONG_MS = 800
+const WAIT_VIEWER_BOOT_MS = 2_000
+
 // 18-residue alpha-helix (chain A) + 8-residue beta-strand (chain B) for realistic 3D preview
 const PDB = `ATOM      1  N   ALA A   1      13.500  13.700   1.100  1.00 12.00           N
 ATOM      2  CA  ALA A   1      14.300  14.000   1.500  1.00 12.00           C
@@ -113,7 +120,7 @@ END
 const JOB = {
   job_id: 'job_ss0',
   status: 'completed',
-  created_at: new Date(Date.now() - 120000).toISOString(),
+  created_at: new Date(Date.now() - JOB_AGE_MS).toISOString(),
   updated_at: new Date().toISOString(),
   job_name: 'Screenshot Job',
   input: { sequence: 'ALIEKALE', num_designs: 2 },
@@ -149,6 +156,8 @@ async function revealHoverSpotlight(page: Page) {
 }
 
 test('take after screenshots', async ({ page }) => {
+  test.setTimeout(SCREENSHOT_TEST_TIMEOUT_MS)
+
   await page.route('**/api/mcp/services/status', r => r.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ alphafold: { status: 'ready', url: 'x' } })
@@ -161,15 +170,15 @@ test('take after screenshots', async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.waitForTimeout(2000)
+  await page.waitForTimeout(WAIT_VIEWER_BOOT_MS)
   await page.screenshot({ path: '/tmp/ss-after-dashboard.png', fullPage: false })
 
   await page.getByTestId('job-card-job_ss0').click()
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(WAIT_LONG_MS)
   await page.screenshot({ path: '/tmp/ss-after-job.png', fullPage: false })
 
   await page.getByRole('button', { name: /View Target in 3D/i }).click()
-  await page.waitForTimeout(2000)
+  await page.waitForTimeout(WAIT_VIEWER_BOOT_MS)
   await page.screenshot({ path: '/tmp/ss-after-3d.png', fullPage: false })
 
   // Hover spotlight state
@@ -210,7 +219,7 @@ test('take after screenshots', async ({ page }) => {
   // Legend interaction state
   try {
     await page.getByTestId('viewer-legend-chain-B').click()
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(WAIT_MEDIUM_MS)
     const legend = page.getByTestId('viewer-legend-chain-B')
     const lb = await legend.boundingBox()
     if (lb && lb.width > 10) {
@@ -223,7 +232,7 @@ test('take after screenshots', async ({ page }) => {
 
   // Select hotspots to show selection spotlight
   await page.getByTestId('viewer-hotspots-3').click()
-  await page.waitForTimeout(600)
+  await page.waitForTimeout(WAIT_MEDIUM_MS)
   await page.screenshot({ path: '/tmp/ss-after-selection.png', fullPage: false })
 
   // Angle measurement card (3-residue selection shows the Cα–Cα–Cα angle)
@@ -248,11 +257,11 @@ test('take after screenshots', async ({ page }) => {
   try {
     // First click a chain-B hotspot so the sequence map populates
     await page.getByTestId('viewer-chain-hotspots-B').click()
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(WAIT_MEDIUM_MS)
     const seqMap = page.getByTestId('viewer-sequence-map')
     if (await seqMap.isVisible()) {
       await seqMap.scrollIntoViewIfNeeded()
-      await page.waitForTimeout(200)
+      await page.waitForTimeout(WAIT_SHORT_MS)
       const sm = await seqMap.boundingBox()
       if (sm && sm.width > 10 && sm.height > 10) {
         const y = Math.max(0, sm.y)
@@ -270,13 +279,13 @@ test('take after screenshots', async ({ page }) => {
   // Measure overlay SVG (select 2 residues then scroll 3D canvas into view)
   try {
     await page.getByTestId('viewer-chain-hotspots-B').click()
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(WAIT_SHORT_MS)
     // Remove one residue to get exactly 2 selected → distance line should appear
     const chips = page.locator('[data-testid^="viewer-selection-spotlight-chip-"]')
     const chipCount = await chips.count()
     if (chipCount > 2) {
       await chips.first().click()
-      await page.waitForTimeout(300)
+      await page.waitForTimeout(WAIT_SHORT_MS)
     }
     const overlay = page.getByTestId('viewer-measure-overlay')
     if (await overlay.isVisible()) {
@@ -288,26 +297,26 @@ test('take after screenshots', async ({ page }) => {
   try {
     await page.getByTestId('viewer-selection-spotlight-clear').click().catch(() => {})
     await page.getByRole('button', { name: 'Spacefill', exact: true }).click()
-    await page.waitForTimeout(800)
+    await page.waitForTimeout(WAIT_LONG_MS)
     await page.screenshot({ path: '/tmp/ss-after-spacefill.png', fullPage: false })
     // Switch back to ribbon
     await page.getByRole('button', { name: 'Ribbon', exact: true }).click()
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(WAIT_SHORT_MS)
   } catch { /* ok */ }
 
   // Cartoon mode
   try {
     await page.getByRole('button', { name: 'Cartoon', exact: true }).click()
-    await page.waitForTimeout(600)
+    await page.waitForTimeout(WAIT_MEDIUM_MS)
     await page.screenshot({ path: '/tmp/ss-after-cartoon.png', fullPage: false })
     await page.getByRole('button', { name: 'Ribbon', exact: true }).click()
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(WAIT_SHORT_MS)
   } catch { /* ok */ }
 
   // 3D distance measurement lines (2-residue selection)
   try {
     await page.getByTestId('viewer-hotspots-3').click()
-    await page.waitForTimeout(800)
+    await page.waitForTimeout(WAIT_LONG_MS)
     await page.screenshot({ path: '/tmp/ss-after-3d-with-selection.png', fullPage: false })
   } catch { /* ok */ }
 })
