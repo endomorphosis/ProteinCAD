@@ -253,6 +253,46 @@ test('take after screenshots', async ({ page }) => {
     }
   } catch { /* ok */ }
 
+  // Selection analytics panel and pair-to-analysis interaction
+  try {
+    const analytics = page.getByTestId('viewer-selection-analytics')
+    if (await analytics.isVisible()) {
+      await analytics.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(WAIT_SHORT_MS)
+      const ab = await analytics.boundingBox()
+      if (ab && ab.width > 10 && ab.height > 10) {
+        const y = Math.max(0, ab.y)
+        const h = Math.min(ab.height, vp.height - y)
+        if (h > 0) {
+          await page.screenshot({
+            path: '/tmp/ss-after-selection-analytics.png',
+            clip: { x: Math.max(0, ab.x), y, width: Math.min(ab.width, vp.width - ab.x), height: h },
+          })
+        }
+      }
+    }
+
+    const usePair = page.getByTestId('viewer-selection-use-pair').first()
+    if (await usePair.isVisible()) {
+      await usePair.click()
+      await page.waitForTimeout(WAIT_SHORT_MS)
+      const analysisRibbon = page.getByTestId('viewer-analysis-ribbon')
+      if (await analysisRibbon.isVisible()) {
+        const rb = await analysisRibbon.boundingBox()
+        if (rb && rb.width > 10 && rb.height > 10) {
+          const y = Math.max(0, rb.y)
+          const h = Math.min(rb.height + 20, vp.height - y)
+          if (h > 0) {
+            await page.screenshot({
+              path: '/tmp/ss-after-analysis-ribbon.png',
+              clip: { x: 0, y, width: vp.width, height: h },
+            })
+          }
+        }
+      }
+    }
+  } catch { /* ok */ }
+
   // Sequence map with B-factor sparkline bars
   try {
     // First click a chain-B hotspot so the sequence map populates
