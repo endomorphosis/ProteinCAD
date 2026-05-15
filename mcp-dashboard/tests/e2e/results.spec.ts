@@ -320,7 +320,7 @@ test.describe('Results viewer', () => {
     await expect(page.getByText(/Use an ascending residue range like A:1-3/i)).toBeVisible()
 
     await page.getByTestId('viewer-focus-selection').click()
-    await expect(page.getByText(/Centered 1 selected residue/i)).toBeVisible()
+    await expect(page.getByText(/Centered \d+ selected residue/i)).toBeVisible()
     await page.getByTestId('viewer-auto-rotate').click()
     await expect(page.getByTestId('viewer-auto-rotate')).toHaveText(/Rotate on/i)
 

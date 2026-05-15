@@ -2155,7 +2155,9 @@ export default function ProteinViewer3D({
           return
         }
 
-        applySelection([selection], `Selected residue ${selection.chain}:${selection.residueNum}.`)
+        setSelectedResidues([selection])
+        syncPositionsFromSelection([selection])
+        setAnalysisMessage(`Selected residue ${selection.chain}:${selection.residueNum}.`)
         focusSelectionEntry(selection)
       }
       renderer.domElement.addEventListener('click', handleClick)
