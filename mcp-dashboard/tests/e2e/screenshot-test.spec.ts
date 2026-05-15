@@ -272,11 +272,37 @@ test('take after screenshots', async ({ page }) => {
       }
     }
 
+    const analysisRibbon = page.getByTestId('viewer-analysis-ribbon')
+    if (await analysisRibbon.isVisible()) {
+      await analysisRibbon.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(WAIT_SHORT_MS)
+      const rb = await analysisRibbon.boundingBox()
+      if (rb && rb.width > 10 && rb.height > 10) {
+        const y = Math.max(0, rb.y)
+        const h = Math.min(rb.height + 20, vp.height - y)
+        if (h > 0) {
+          await page.screenshot({
+            path: '/tmp/ss-after-analysis-ribbon.png',
+            clip: { x: 0, y, width: vp.width, height: h },
+          })
+        }
+      }
+
+      // Exercise quick analysis actions and capture resulting UI state
+      await page.getByTestId('viewer-analysis-center').click().catch(() => {})
+      await page.getByTestId('viewer-analysis-copy').click().catch(() => {})
+      const positionsInput = page.getByTestId('viewer-analysis-positions-input')
+      if (await positionsInput.isVisible()) {
+        await positionsInput.fill('9,10')
+      }
+      await page.waitForTimeout(WAIT_SHORT_MS)
+      await page.screenshot({ path: '/tmp/ss-after-analysis-actions.png', fullPage: false })
+    }
+
     const usePair = page.getByTestId('viewer-selection-use-pair').first()
     if (await usePair.isVisible()) {
       await usePair.click()
       await page.waitForTimeout(WAIT_SHORT_MS)
-      const analysisRibbon = page.getByTestId('viewer-analysis-ribbon')
       if (await analysisRibbon.isVisible()) {
         const rb = await analysisRibbon.boundingBox()
         if (rb && rb.width > 10 && rb.height > 10) {
