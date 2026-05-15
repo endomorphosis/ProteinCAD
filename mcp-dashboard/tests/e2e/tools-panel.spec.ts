@@ -111,6 +111,7 @@ test.describe('MCP Tools panel', () => {
   test('manual tool call works with arguments', async ({ page }) => {
     await page.goto('/')
 
+    await page.getByText('Advanced manual tool call').click()
     await page.getByLabel('Tool').selectOption('predict_structure')
     await page.getByLabel('sequence *', { exact: true }).fill('ACDE')
 

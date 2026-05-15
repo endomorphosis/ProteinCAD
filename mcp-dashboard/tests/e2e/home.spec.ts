@@ -29,14 +29,15 @@ test.describe('Dashboard home', () => {
     await page.goto('/')
 
     await expect(page.getByRole('heading', { name: /Protein Binder Design/i })).toBeVisible()
+    const servicePanel = page.getByTestId('service-status-panel')
     await expect(page.getByRole('heading', { name: 'Service Status' })).toBeVisible()
 
-    await expect(page.getByText('alphafold', { exact: true })).toBeVisible()
-    await expect(page.getByText('rfdiffusion', { exact: true })).toBeVisible()
-    await expect(page.getByText('proteinmpnn', { exact: true })).toBeVisible()
-    await expect(page.getByText('alphafold_multimer', { exact: true })).toBeVisible()
+    await expect(servicePanel.getByTestId('service-card-alphafold')).toContainText('alphafold')
+    await expect(servicePanel.getByTestId('service-card-rfdiffusion')).toContainText('rfdiffusion')
+    await expect(servicePanel.getByTestId('service-card-proteinmpnn')).toContainText('proteinmpnn')
+    await expect(servicePanel.getByTestId('service-card-alphafold_multimer')).toContainText('alphafold_multimer')
 
-    await expect(page.getByText('ready').first()).toBeVisible()
+    await expect(servicePanel.getByText('ready').first()).toBeVisible()
 
     // Verbose warnings should be visible for non-ready services
     await expect(page.getByRole('heading', { name: 'Warnings' })).toBeVisible()
