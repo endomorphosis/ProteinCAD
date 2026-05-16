@@ -4,6 +4,8 @@
 
 This plan adds a BLAST-backed retrieval layer to ProteinCAD so the MCP server and dashboard can ground protein-design workflows in homologous sequence evidence, annotations, and provenance-aware dataset snapshots. The default local persistence layer should be DuckDB, with `endomorphosis/ipfs_datasets_py` used selectively for external dataset acquisition, scraping, normalization, Parquet conversion, and optional IPFS packaging when upstream sources are not already available in a structured format.
 
+For a resumable, execution-oriented checklist that can be carried across Copilot sessions, see [BLAST_RAG_TODO.md](BLAST_RAG_TODO.md).
+
 The recommended rollout is incremental:
 
 1. Introduce a DuckDB-backed retrieval store and manifest format.
