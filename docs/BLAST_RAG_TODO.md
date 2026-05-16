@@ -26,23 +26,23 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 0 completed, Milestone 1 ready
+- **Status**: Milestone 1 completed, Milestone 2 ready
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 1 — remote BLAST provider
-- **Next in-progress task**: add a retrieval provider abstraction under `mcp-server/`
+- **Current milestone**: Milestone 2 — evidence enrichment
+- **Next in-progress task**: define the normalized annotation/evidence record shape under `mcp-server/`
 - **Primary edit targets**:
-  - `mcp-server/server.py`
   - `mcp-server/retrieval_store.py`
-  - `mcp-server/runtime_config.py`
-  - `mcp-server/model_backends.py`
+  - `mcp-server/retrieval_service.py`
+  - `mcp-server/retrieval_provider.py`
+  - `mcp-server/server.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - whether BLAST grounding is opt-in or enabled by default for design jobs
 - **Recommended first implementation slice**:
-  1. remote BLAST provider abstraction
-  2. remote submission/polling against NCBI BLAST
-  3. raw payload persistence plus normalized hit writes
-  4. MCP-only endpoints/tools
+  1. normalized annotation/evidence schema
+  2. accession/title/organism enrichment pipeline
+  3. evidence document generation with provenance columns
+  4. MCP-only retrieval endpoints/tools
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -83,14 +83,14 @@ Goal: establish the minimal structure needed to start real implementation withou
 
 Goal: enable remote BLAST query submission and normalized hit persistence.
 
-- [ ] Add a retrieval provider abstraction under `mcp-server/`
-- [ ] Implement NCBI BLAST Common URL API submission (`CMD=Put`)
-- [ ] Capture and persist `RID` and `RTOE`
-- [ ] Implement polling flow (`CMD=Get`) with bounded retries/backoff
-- [ ] Persist raw BLAST payloads to DuckDB
-- [ ] Normalize BLAST hits and alignments into DuckDB tables
-- [ ] Add cache key deduplication so repeated queries skip duplicate remote submissions
-- [ ] Add structured error handling for timeout, invalid response, and upstream failure cases
+- [x] Add a retrieval provider abstraction under `mcp-server/`
+- [x] Implement NCBI BLAST Common URL API submission (`CMD=Put`)
+- [x] Capture and persist `RID` and `RTOE`
+- [x] Implement polling flow (`CMD=Get`) with bounded retries/backoff
+- [x] Persist raw BLAST payloads to DuckDB
+- [x] Normalize BLAST hits and alignments into DuckDB tables
+- [x] Add cache key deduplication so repeated queries skip duplicate remote submissions
+- [x] Add structured error handling for timeout, invalid response, and upstream failure cases
 
 ### Exit criteria
 
@@ -177,11 +177,11 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Add remote BLAST provider interface and placeholder wiring
-2. [ ] Implement NCBI BLAST `CMD=Put` submission and `RID`/`RTOE` capture
-3. [ ] Implement `CMD=Get` polling with bounded retries/backoff
-4. [ ] Persist raw BLAST payloads plus normalized hits into DuckDB
-5. [ ] Add mocked tests for BLAST response parsing and polling
+1. [ ] Define normalized annotation/evidence record shape
+2. [ ] Add accession/title/organism enrichment pipeline
+3. [ ] Add evidence document generation and provenance columns
+4. [ ] Add optional Parquet export for enriched evidence batches
+5. [ ] Add mocked tests for enrichment transforms
 6. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
 
 ---
@@ -190,12 +190,13 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: Milestone 0 scaffolding — runtime config, DuckDB schema bootstrap, feature flags, and resume-state docs
-- **Next recommended task**: add a retrieval provider abstraction under `mcp-server/`
+- **Last completed task**: Milestone 1 remote BLAST provider — provider abstraction, remote submit/poll flow, DuckDB persistence, cache reuse, and mocked tests
+- **Next recommended task**: define the normalized annotation/evidence record shape under `mcp-server/`
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-server/retrieval_store.py`
-  - `mcp-server/runtime_config.py`
+  - `mcp-server/retrieval_service.py`
+  - `mcp-server/retrieval_provider.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - decide whether BLAST grounding stays opt-in once MCP endpoints exist

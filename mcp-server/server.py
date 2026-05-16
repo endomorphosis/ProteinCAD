@@ -27,6 +27,7 @@ from model_backends import BackendManager, EmbeddedBackend, allow_mock_outputs
 from runtime_config import RuntimeConfigManager
 from gpu_init import setup_gpu_for_server
 from retrieval_store import RetrievalStore
+from retrieval_service import BlastRetrievalService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +49,10 @@ app = FastAPI(
     version="1.0.0"
 )
 app.state.retrieval_store = RetrievalStore(config_manager.get().retrieval)
+app.state.retrieval_service = BlastRetrievalService(
+    config=config_manager.get().retrieval,
+    store=app.state.retrieval_store,
+)
 
 
 # GPU Status Endpoint
@@ -140,6 +145,10 @@ async def _startup_tasks() -> None:
 
 async def _refresh_retrieval_store() -> None:
     app.state.retrieval_store.update_config(config_manager.get().retrieval)
+    app.state.retrieval_service = BlastRetrievalService(
+        config=config_manager.get().retrieval,
+        store=app.state.retrieval_store,
+    )
     retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
     if retrieval_error:
         logger.warning("BLAST retrieval initialization failed after config refresh: %s", retrieval_error)
@@ -684,16 +693,20 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     patch = arguments.get("patch")
                 if not isinstance(patch, dict):
                     return _jsonrpc_error(msg_id, -32602, "Invalid patch")
-                updated = config_manager.update(patch)
-                _ = backend_manager.get()
+                async with runtime_config_lock:
+                    updated = config_manager.update(patch)
+                    _ = backend_manager.get()
+                    await _refresh_retrieval_store()
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(updated.model_dump(), indent=2)}], "isError": False},
                 )
 
             if name == "reset_runtime_config":
-                updated = config_manager.reset_to_defaults()
-                _ = backend_manager.get()
+                async with runtime_config_lock:
+                    updated = config_manager.reset_to_defaults()
+                    _ = backend_manager.get()
+                    await _refresh_retrieval_store()
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(updated.model_dump(), indent=2)}], "isError": False},

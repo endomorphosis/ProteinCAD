@@ -16,6 +16,18 @@ The recommended rollout is incremental:
 
 ---
 
+## Implementation Status
+
+- Milestone 0 scaffolding is complete.
+- Milestone 1 remote BLAST retrieval is now implemented in the MCP server internals via:
+  - `mcp-server/retrieval_provider.py`
+  - `mcp-server/retrieval_service.py`
+  - `mcp-server/retrieval_store.py`
+- Remote retrieval currently covers NCBI BLAST `CMD=Put`, `CMD=Get` polling, DuckDB persistence, raw payload retention, alignment normalization, cache reuse, and mocked test coverage.
+- MCP/REST exposure and evidence-enrichment UX are still pending and should follow the daemon ledger order in `docs/BLAST_RAG_TODO.md`.
+
+---
+
 ## Goals
 
 - Add BLAST as a first-class retrieval source for sequence-centric grounding.
