@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Runtime config + backend manager (supports NIM/external/embedded + fallback)
 config_manager = RuntimeConfigManager()
 backend_manager = BackendManager(config_manager)
-retrieval_store = RetrievalStore(config_manager.get().retrieval)
+runtime_config_lock = asyncio.Lock()
 
 # Initialize GPU optimizations on startup
 logger.info("Initializing GPU optimizations...")
@@ -47,6 +47,7 @@ app = FastAPI(
     description=f"Model Context Protocol server for managing protein design workflows\nBackend: {os.getenv('MODEL_BACKEND', 'nim')}",
     version="1.0.0"
 )
+app.state.retrieval_store = RetrievalStore(config_manager.get().retrieval)
 
 
 # GPU Status Endpoint
@@ -130,9 +131,18 @@ async def _startup_tasks() -> None:
     except Exception:
         pass
     try:
-        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
+        retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
+        if retrieval_error:
+            logger.warning("BLAST retrieval startup initialization failed: %s", retrieval_error)
     except Exception:
         pass
+
+
+async def _refresh_retrieval_store() -> None:
+    app.state.retrieval_store.update_config(config_manager.get().retrieval)
+    retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
+    if retrieval_error:
+        logger.warning("BLAST retrieval initialization failed after config refresh: %s", retrieval_error)
 
 
 @app.get("/api/config")
@@ -150,13 +160,12 @@ async def update_runtime_config(request: Request) -> Dict[str, Any]:
     """
     patch = await request.json()
     try:
-        updated = config_manager.update(patch)
-        # Force backend rebuild on next use.
-        _ = backend_manager.get()
-        global retrieval_store
-        retrieval_store = RetrievalStore(updated.retrieval)
-        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
-        return updated.model_dump()
+        async with runtime_config_lock:
+            updated = config_manager.update(patch)
+            # Force backend rebuild on next use.
+            _ = backend_manager.get()
+            await _refresh_retrieval_store()
+            return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except Exception as exc:
@@ -167,12 +176,11 @@ async def update_runtime_config(request: Request) -> Dict[str, Any]:
 async def reset_runtime_config() -> Dict[str, Any]:
     """Reset runtime config to defaults."""
     try:
-        updated = config_manager.reset_to_defaults()
-        _ = backend_manager.get()
-        global retrieval_store
-        retrieval_store = RetrievalStore(updated.retrieval)
-        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
-        return updated.model_dump()
+        async with runtime_config_lock:
+            updated = config_manager.reset_to_defaults()
+            _ = backend_manager.get()
+            await _refresh_retrieval_store()
+            return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
@@ -1051,7 +1059,7 @@ async def health_check() -> Dict[str, Any]:
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "retrieval": retrieval_store.diagnostics(),
+        "retrieval": app.state.retrieval_store.diagnostics(),
     }
 
 @app.get("/api/services/status")

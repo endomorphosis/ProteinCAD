@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Optional
 
 import duckdb
@@ -120,6 +121,7 @@ class RetrievalStore:
     config: RetrievalConfig
     initialized: bool = False
     last_error: Optional[str] = None
+    _lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def _duckdb_path(self) -> Path:
         return Path(self.config.storage.duckdb_path).expanduser()
@@ -135,34 +137,65 @@ class RetrievalStore:
             Path(raw_path).expanduser().mkdir(parents=True, exist_ok=True)
 
     def ensure_schema(self) -> None:
-        self._ensure_parent_dirs()
-        db_path = self._duckdb_path()
-        with duckdb.connect(str(db_path)) as conn:
-            for statement in SCHEMA_STATEMENTS:
-                conn.execute(statement)
-            conn.execute(
-                """
-                INSERT INTO schema_migrations (version, description, applied_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT DO NOTHING
-                """,
-                [SCHEMA_VERSION, "Initial BLAST retrieval schema bootstrap", _utcnow()],
-            )
-        self.initialized = True
-        self.last_error = None
+        with self._lock:
+            self._ensure_parent_dirs()
+            db_path = self._duckdb_path()
+            with duckdb.connect(str(db_path)) as conn:
+                for statement in SCHEMA_STATEMENTS:
+                    conn.execute(statement)
+                conn.execute(
+                    """
+                    INSERT INTO schema_migrations (version, description, applied_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    [SCHEMA_VERSION, "Initial BLAST retrieval schema bootstrap", _utcnow()],
+                )
+            self.initialized = True
+            self.last_error = None
 
-    def initialize_if_enabled(self) -> None:
-        self.initialized = False
-        self.last_error = None
-        if not self.config.feature_flags.enabled:
-            return
-        if not self.config.feature_flags.create_schema_on_startup:
-            return
+    def initialize_if_enabled(self) -> Optional[str]:
+        with self._lock:
+            enabled = self.config.feature_flags.enabled
+            create_schema = self.config.feature_flags.create_schema_on_startup
+            if not enabled or not create_schema:
+                self.initialized = False
+                self.last_error = None
+                return None
         try:
             self.ensure_schema()
         except Exception as exc:
-            self.last_error = str(exc)
+            with self._lock:
+                self.initialized = False
+                self.last_error = str(exc)
             logger.warning("BLAST retrieval schema initialization failed: %s", exc)
+            return self.last_error
+        return None
+
+    def update_config(self, config: RetrievalConfig) -> None:
+        with self._lock:
+            self.config = config
+            self.initialized = False
+            self.last_error = None
+
+    def schema_tables(self) -> set[str]:
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return set()
+            with duckdb.connect(str(self._duckdb_path()), read_only=True) as conn:
+                return {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+                    ).fetchall()
+                }
+
+    def migration_versions(self) -> list[int]:
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return []
+            with duckdb.connect(str(self._duckdb_path()), read_only=True) as conn:
+                return [row[0] for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()]
 
     def diagnostics(self) -> Dict[str, Any]:
         return {

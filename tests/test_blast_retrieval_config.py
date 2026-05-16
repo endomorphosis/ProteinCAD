@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
 import sys
-
-import duckdb
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
@@ -69,16 +67,33 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
 
     assert store.initialized is True
     assert store.last_error is None
+    tables = store.schema_tables()
+    assert "retrieval_requests" in tables
+    assert "blast_hits" in tables
+    assert "dataset_manifests" in tables
+    assert store.migration_versions() == [1]
 
-    with duckdb.connect(cfg.retrieval.storage.duckdb_path) as conn:
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-            ).fetchall()
-        }
-        assert "retrieval_requests" in tables
-        assert "blast_hits" in tables
-        assert "dataset_manifests" in tables
-        migration_rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
-        assert migration_rows == [(1,)]
+
+def test_retrieval_store_skips_schema_when_disabled(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.feature_flags.enabled = False
+    cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+
+    store = RetrievalStore(cfg.retrieval)
+    assert store.initialize_if_enabled() is None
+    assert store.initialized is False
+    assert Path(cfg.retrieval.storage.duckdb_path).exists() is False
+
+
+def test_retrieval_store_skips_schema_when_startup_bootstrap_disabled(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.feature_flags.create_schema_on_startup = False
+    cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+
+    store = RetrievalStore(cfg.retrieval)
+    assert store.initialize_if_enabled() is None
+    assert store.initialized is False
+    assert Path(cfg.retrieval.storage.duckdb_path).exists() is False
