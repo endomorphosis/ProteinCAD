@@ -22,6 +22,7 @@ Use this page as the **canonical entrypoint** to find the right guide.
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Component overview, run modes, request flow, backend routing, API surface |
+| [BLAST_RAG_INTEGRATION_PLAN.md](BLAST_RAG_INTEGRATION_PLAN.md) | DuckDB-first plan for integrating NCBI BLAST retrieval, evidence caching, and optional `ipfs_datasets_py` ingestion |
 | [AGENTS.md](AGENTS.md) | How AI agents and contributors should interact with the codebase deterministically |
 
 ---
