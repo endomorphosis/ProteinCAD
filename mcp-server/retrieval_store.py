@@ -17,7 +17,7 @@ from runtime_config import RetrievalConfig
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_STATEMENTS = (
     """
@@ -94,16 +94,35 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS protein_annotations (
+        request_id VARCHAR NOT NULL,
+        run_id VARCHAR NOT NULL,
+        hit_rank INTEGER NOT NULL,
+        source_system VARCHAR NOT NULL,
+        source_id VARCHAR NOT NULL,
+        accession VARCHAR,
+        title TEXT,
+        organism VARCHAR,
+        annotation_json TEXT,
+        retrieved_at TIMESTAMP NOT NULL,
+        transform_version VARCHAR NOT NULL,
+        PRIMARY KEY (request_id, hit_rank)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS evidence_documents (
         evidence_id VARCHAR PRIMARY KEY,
         request_id VARCHAR NOT NULL,
-        source_kind VARCHAR NOT NULL,
-        source_identifier VARCHAR NOT NULL,
+        run_id VARCHAR NOT NULL,
+        hit_rank INTEGER,
+        source_system VARCHAR NOT NULL,
+        source_id VARCHAR NOT NULL,
         title TEXT,
         content_text TEXT,
         content_json TEXT,
         transform_version VARCHAR,
         manifest_id VARCHAR,
+        retrieved_at TIMESTAMP,
         created_at TIMESTAMP NOT NULL
     )
     """,
@@ -130,6 +149,16 @@ SCHEMA_STATEMENTS = (
         created_at TIMESTAMP NOT NULL
     )
     """,
+)
+
+MIGRATION_STATEMENTS = (
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS run_id VARCHAR",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS hit_rank INTEGER",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_system VARCHAR",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_id VARCHAR",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_kind VARCHAR",
+    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_identifier VARCHAR",
 )
 
 
@@ -168,13 +197,15 @@ class RetrievalStore:
             with self._connect() as conn:
                 for statement in SCHEMA_STATEMENTS:
                     conn.execute(statement)
+                for statement in MIGRATION_STATEMENTS:
+                    conn.execute(statement)
                 conn.execute(
                     """
                     INSERT INTO schema_migrations (version, description, applied_at)
                     VALUES (?, ?, ?)
                     ON CONFLICT DO NOTHING
                     """,
-                    [SCHEMA_VERSION, "BLAST retrieval schema with hits and alignments", _utcnow()],
+                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment", _utcnow()],
                 )
             self.initialized = True
             self.last_error = None
@@ -365,6 +396,67 @@ class RetrievalStore:
                         ],
                     )
 
+    def replace_annotations(self, request_id: str, annotations: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM protein_annotations WHERE request_id = ?", [request_id])
+                for annotation in annotations:
+                    conn.execute(
+                        """
+                        INSERT INTO protein_annotations (
+                            request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                            organism, annotation_json, retrieved_at, transform_version
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            request_id,
+                            annotation["run_id"],
+                            annotation["hit_rank"],
+                            annotation["source_system"],
+                            annotation["source_id"],
+                            annotation.get("accession"),
+                            annotation.get("title"),
+                            annotation.get("organism"),
+                            json.dumps(annotation.get("annotation", {}), sort_keys=True),
+                            annotation["retrieved_at"],
+                            annotation["transform_version"],
+                        ],
+                    )
+
+    def replace_evidence_documents(self, request_id: str, evidence_documents: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM evidence_documents WHERE request_id = ?", [request_id])
+                for evidence_document in evidence_documents:
+                    conn.execute(
+                        """
+                        INSERT INTO evidence_documents (
+                            evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                            content_text, content_json, transform_version, manifest_id, retrieved_at, created_at,
+                            source_kind, source_identifier
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            evidence_document["evidence_id"],
+                            request_id,
+                            evidence_document["run_id"],
+                            evidence_document.get("hit_rank"),
+                            evidence_document["source_system"],
+                            evidence_document["source_id"],
+                            evidence_document.get("title"),
+                            evidence_document.get("content_text"),
+                            json.dumps(evidence_document.get("content", {}), sort_keys=True),
+                            evidence_document.get("transform_version"),
+                            evidence_document.get("manifest_id"),
+                            evidence_document.get("retrieved_at"),
+                            evidence_document["created_at"],
+                            evidence_document.get("source_system"),
+                            evidence_document.get("source_id"),
+                        ],
+                    )
+
     def upsert_cache_entry(
         self,
         *,
@@ -448,7 +540,14 @@ class RetrievalStore:
                 run_cols = [desc[0] for desc in runs_cur.description]
                 runs = [self._row_to_dict(run_cols, row) for row in runs_cur.fetchall()]
                 if not runs:
-                    return {**request_data, "runs": [], "hits": [], "alignments": []}
+                    return {
+                        **request_data,
+                        "runs": [],
+                        "hits": [],
+                        "alignments": [],
+                        "annotations": [],
+                        "evidence_documents": [],
+                    }
 
                 latest_run_id = runs[-1]["run_id"]
                 hits_cur = conn.execute(
@@ -486,7 +585,46 @@ class RetrievalStore:
                     if isinstance(alignment.get("raw_alignment_json"), str):
                         alignment["raw_alignment"] = json.loads(alignment.pop("raw_alignment_json"))
 
-                return {**request_data, "runs": runs, "hits": hits, "alignments": alignments}
+                annotation_cur = conn.execute(
+                    """
+                    SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                           organism, annotation_json, retrieved_at, transform_version
+                    FROM protein_annotations
+                    WHERE request_id = ?
+                    ORDER BY hit_rank ASC
+                    """,
+                    [request_id],
+                )
+                annotation_cols = [desc[0] for desc in annotation_cur.description]
+                annotations = [self._row_to_dict(annotation_cols, row) for row in annotation_cur.fetchall()]
+                for annotation in annotations:
+                    if isinstance(annotation.get("annotation_json"), str):
+                        annotation["annotation"] = json.loads(annotation.pop("annotation_json"))
+
+                evidence_cur = conn.execute(
+                    """
+                    SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                           content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
+                    FROM evidence_documents
+                    WHERE request_id = ?
+                    ORDER BY hit_rank ASC NULLS LAST, created_at ASC
+                    """,
+                    [request_id],
+                )
+                evidence_cols = [desc[0] for desc in evidence_cur.description]
+                evidence_documents = [self._row_to_dict(evidence_cols, row) for row in evidence_cur.fetchall()]
+                for evidence_document in evidence_documents:
+                    if isinstance(evidence_document.get("content_json"), str):
+                        evidence_document["content"] = json.loads(evidence_document.pop("content_json"))
+
+                return {
+                    **request_data,
+                    "runs": runs,
+                    "hits": hits,
+                    "alignments": alignments,
+                    "annotations": annotations,
+                    "evidence_documents": evidence_documents,
+                }
 
     def schema_tables(self) -> set[str]:
         with self._lock:

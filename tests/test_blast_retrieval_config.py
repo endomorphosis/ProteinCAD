@@ -78,10 +78,11 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
     assert "retrieval_requests" in tables
     assert "blast_hits" in tables
     assert "blast_alignments" in tables
+    assert "protein_annotations" in tables
     assert "dataset_manifests" in tables
     versions = store.migration_versions()
-    assert 2 in versions
-    assert max(versions) == 2
+    assert 3 in versions
+    assert max(versions) == 3
 
 
 def test_retrieval_store_skips_schema_when_disabled(tmp_path):
@@ -106,6 +107,7 @@ def test_parse_submission_response_extracts_rid_and_rtoe():
 def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     cfg = MCPServerConfig()
     cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.feature_flags.evidence_enrichment = True
     cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
     cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
     cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
@@ -178,11 +180,23 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     assert first.remote_request_id == "TEST123"
     assert first.result["hits"][0]["accession"] == "ABC123"
     assert first.result["hits"][0]["organism"] == "Testus organismus"
+    assert first.annotation_count == 1
+    assert first.evidence_count == 1
+    assert first.result["annotations"][0]["source_system"] == "ncbi_blast"
+    assert first.result["annotations"][0]["source_id"] == "ABC123"
+    assert first.result["annotations"][0]["annotation"]["bit_score"] == 55.0
+    assert first.result["evidence_documents"][0]["title"] == "Example protein"
+    assert "bit score 55.0" in first.result["evidence_documents"][0]["content_text"]
+    assert first.result["evidence_packet"]["document_count"] == 1
+    assert first.result["evidence_packet"]["documents"][0]["source_id"] == "ABC123"
     assert len(first.result["alignments"]) == 1
     assert Path(first.raw_payload_path or "").exists() is True
 
     assert second.status == "completed"
     assert second.cached is True
+    assert second.annotation_count == 1
+    assert second.evidence_count == 1
+    assert second.result["evidence_packet"]["document_count"] == 1
     assert request_counts == {"submit": 1, "search_info": 2, "result": 1}
 
 

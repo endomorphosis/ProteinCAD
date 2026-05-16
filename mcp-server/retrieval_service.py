@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 
 from retrieval_provider import (
+    BlastHit,
     BlastSubmission,
     ProviderExecutionResult,
     RetrievalConfigError,
@@ -22,6 +24,38 @@ from retrieval_provider import (
 )
 from retrieval_store import RetrievalStore
 from runtime_config import RetrievalConfig
+
+EVIDENCE_TRANSFORM_VERSION = "blast_evidence_v1"
+
+
+@dataclass(frozen=True)
+class AnnotationRecord:
+    run_id: str
+    hit_rank: int
+    source_system: str
+    source_id: str
+    accession: Optional[str]
+    title: str
+    organism: Optional[str]
+    annotation: Dict[str, Any]
+    retrieved_at: str
+    transform_version: str = EVIDENCE_TRANSFORM_VERSION
+
+
+@dataclass(frozen=True)
+class EvidenceDocument:
+    evidence_id: str
+    run_id: str
+    hit_rank: int
+    source_system: str
+    source_id: str
+    title: str
+    content_text: str
+    content: Dict[str, Any]
+    transform_version: str
+    manifest_id: Optional[str]
+    retrieved_at: str
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -36,6 +70,8 @@ class BlastRetrievalResult:
     remote_queue_hint_seconds: Optional[float]
     raw_payload_path: Optional[str]
     hit_count: int
+    annotation_count: int
+    evidence_count: int
     result: Dict[str, Any]
 
 
@@ -76,6 +112,7 @@ class BlastRetrievalService:
         cached_result = self._store.get_cached_result(cache_key)
         if cached_result and cached_result.get("status") == "completed":
             latest_run = (cached_result.get("runs") or [{}])[-1]
+            cached_result = self._with_evidence_packet(cached_result)
             return BlastRetrievalResult(
                 request_id=cached_result["request_id"],
                 run_id=latest_run.get("run_id"),
@@ -87,6 +124,8 @@ class BlastRetrievalService:
                 remote_queue_hint_seconds=latest_run.get("remote_queue_hint_seconds"),
                 raw_payload_path=latest_run.get("raw_payload_path"),
                 hit_count=len(cached_result.get("hits") or []),
+                annotation_count=len(cached_result.get("annotations") or []),
+                evidence_count=len(cached_result.get("evidence_documents") or []),
                 result=cached_result,
             )
 
@@ -102,6 +141,7 @@ class BlastRetrievalService:
                 "program": query.program,
                 "database": query.database,
                 "hitlist_size": query.hitlist_size,
+                "enrichment_profile": query.enrichment_profile,
             },
             status="submitted",
         )
@@ -119,7 +159,7 @@ class BlastRetrievalService:
             self._store.update_request_status(request_id, "running")
             provider_result = await self._provider.collect_results(query, submission)
             self._persist_provider_result(request_id, run_id, submission, provider_result)
-            result = self._store.get_request_result(request_id) or {}
+            result = self._with_evidence_packet(self._store.get_request_result(request_id) or {})
             return BlastRetrievalResult(
                 request_id=request_id,
                 run_id=run_id,
@@ -131,18 +171,22 @@ class BlastRetrievalService:
                 remote_queue_hint_seconds=provider_result.submission.remote_queue_hint_seconds,
                 raw_payload_path=(result.get("runs") or [{}])[-1].get("raw_payload_path"),
                 hit_count=len(provider_result.hits),
+                annotation_count=len(result.get("annotations") or []),
+                evidence_count=len(result.get("evidence_documents") or []),
                 result=result,
             )
         except RetrievalError as exc:
             self._store.update_request_status(request_id, "failed", error_text=str(exc))
-            result = self._store.get_request_result(request_id) or {
+            result = self._with_evidence_packet(self._store.get_request_result(request_id) or {
                 "request_id": request_id,
                 "status": "failed",
                 "error_text": str(exc),
                 "runs": [],
                 "hits": [],
                 "alignments": [],
-            }
+                "annotations": [],
+                "evidence_documents": [],
+            })
             return BlastRetrievalResult(
                 request_id=request_id,
                 run_id=run_id,
@@ -154,8 +198,37 @@ class BlastRetrievalService:
                 remote_queue_hint_seconds=None,
                 raw_payload_path=None,
                 hit_count=0,
+                annotation_count=0,
+                evidence_count=0,
                 result=result,
             )
+
+    def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        evidence_documents = list(result.get("evidence_documents") or [])
+        packet_documents = []
+        for evidence_document in evidence_documents[:5]:
+            packet_documents.append(
+                {
+                    "evidence_id": evidence_document.get("evidence_id"),
+                    "hit_rank": evidence_document.get("hit_rank"),
+                    "title": evidence_document.get("title"),
+                    "content_text": evidence_document.get("content_text"),
+                    "source_system": evidence_document.get("source_system"),
+                    "source_id": evidence_document.get("source_id"),
+                    "retrieved_at": evidence_document.get("retrieved_at"),
+                    "transform_version": evidence_document.get("transform_version"),
+                }
+            )
+
+        return {
+            **result,
+            "evidence_packet": {
+                "request_id": result.get("request_id"),
+                "status": result.get("status"),
+                "document_count": len(evidence_documents),
+                "documents": packet_documents,
+            },
+        }
 
     def _persist_provider_result(
         self,
@@ -164,6 +237,11 @@ class BlastRetrievalService:
         submission: BlastSubmission,
         provider_result: ProviderExecutionResult,
     ) -> None:
+        annotations: list[AnnotationRecord] = []
+        evidence_documents: list[EvidenceDocument] = []
+        if self._config.feature_flags.evidence_enrichment:
+            annotations = self._build_annotation_records(run_id, provider_result)
+            evidence_documents = self._build_evidence_documents(run_id, annotations, provider_result.hits)
         for _search_info in provider_result.search_info_history[1:]:
             self._store.update_run_poll_timestamp(run_id)
         raw_payload_path = self._store.write_raw_payload(run_id, provider_result.raw_result)
@@ -172,6 +250,8 @@ class BlastRetrievalService:
             "search_info_history": provider_result.search_info_history,
             "hit_count": len(provider_result.hits),
             "alignment_count": len(provider_result.alignments),
+            "annotation_count": len(annotations),
+            "evidence_count": len(evidence_documents),
         }
         self._store.complete_run(
             run_id,
@@ -180,6 +260,8 @@ class BlastRetrievalService:
         )
         self._store.replace_hits(run_id, serialize_hits(provider_result.hits))
         self._store.replace_alignments(run_id, serialize_alignments(provider_result.alignments))
+        self._store.replace_annotations(request_id, [asdict(annotation) for annotation in annotations])
+        self._store.replace_evidence_documents(request_id, [asdict(evidence_document) for evidence_document in evidence_documents])
         self._store.update_request_status(request_id, "completed")
         self._store.upsert_cache_entry(
             cache_key=provider_result.cache_key,
@@ -188,6 +270,85 @@ class BlastRetrievalService:
             hit_count=len(provider_result.hits),
             storage_path=raw_payload_path,
         )
+
+    def _build_annotation_records(
+        self,
+        run_id: str,
+        provider_result: ProviderExecutionResult,
+    ) -> list[AnnotationRecord]:
+        retrieved_at = _utcnow_iso()
+        return [
+            AnnotationRecord(
+                run_id=run_id,
+                hit_rank=hit.hit_rank,
+                source_system="ncbi_blast",
+                source_id=hit.accession or f"hit_{hit.hit_rank}",
+                accession=hit.accession,
+                title=hit.title,
+                organism=hit.organism,
+                annotation={
+                    "provider": provider_result.provider_name,
+                    "bit_score": hit.bit_score,
+                    "e_value": hit.e_value,
+                    "identity_fraction": hit.identity_fraction,
+                    "positives_fraction": hit.positives_fraction,
+                    "query_coverage": hit.query_coverage,
+                    "subject_coverage": hit.subject_coverage,
+                    "alignment_length": hit.alignment_length,
+                    "subject_length": hit.subject_length,
+                },
+                retrieved_at=retrieved_at,
+            )
+            for hit in provider_result.hits
+        ]
+
+    def _build_evidence_documents(
+        self,
+        run_id: str,
+        annotations: list[AnnotationRecord],
+        hits: list[BlastHit],
+    ) -> list[EvidenceDocument]:
+        created_at = _utcnow_iso()
+        evidence_documents: list[EvidenceDocument] = []
+        for annotation, hit in zip(annotations, hits):
+            summary_parts = [f"BLAST hit #{hit.hit_rank}"]
+            if hit.accession:
+                summary_parts.append(hit.accession)
+            summary_parts.append(hit.title)
+            if hit.organism:
+                summary_parts.append(f"from {hit.organism}")
+            summary_parts.append(f"bit score {hit.bit_score:.1f}")
+            if hit.e_value is not None:
+                summary_parts.append(f"e-value {hit.e_value:.2e}")
+            summary_parts.append(f"query coverage {hit.query_coverage:.1%}")
+
+            evidence_id = str(uuid5(NAMESPACE_URL, f"{run_id}:{annotation.source_id}:{hit.hit_rank}"))
+            evidence_documents.append(
+                EvidenceDocument(
+                    evidence_id=evidence_id,
+                    run_id=run_id,
+                    hit_rank=hit.hit_rank,
+                    source_system=annotation.source_system,
+                    source_id=annotation.source_id,
+                    title=annotation.title,
+                    content_text=", ".join(summary_parts),
+                    content={
+                        "accession": annotation.accession,
+                        "organism": annotation.organism,
+                        "summary_kind": "blast_hit",
+                        "statistics": annotation.annotation,
+                    },
+                    transform_version=annotation.transform_version,
+                    manifest_id=None,
+                    retrieved_at=annotation.retrieved_at,
+                    created_at=created_at,
+                )
+            )
+        return evidence_documents
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def json_dumps(payload: Dict[str, Any]) -> str:

@@ -50,6 +50,7 @@ class BlastRetrievalQuery:
     program: str
     database: str
     hitlist_size: int
+    enrichment_profile: str
     poll_interval_seconds: float
     max_poll_attempts: int
     request_timeout_seconds: float
@@ -130,6 +131,7 @@ def build_cache_key(query: BlastRetrievalQuery) -> str:
             "program": query.program,
             "database": query.database,
             "hitlist_size": query.hitlist_size,
+            "enrichment_profile": query.enrichment_profile,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -154,6 +156,7 @@ def build_query_from_config(
         program=(program or config.blast.default_program).strip() or config.blast.default_program,
         database=(database or config.blast.default_database).strip() or config.blast.default_database,
         hitlist_size=resolved_hitlist,
+        enrichment_profile="evidence_v1" if config.feature_flags.evidence_enrichment else "blast_hit_v1",
         poll_interval_seconds=config.blast.poll_interval_seconds,
         max_poll_attempts=config.blast.max_poll_attempts,
         request_timeout_seconds=config.blast.request_timeout_seconds,

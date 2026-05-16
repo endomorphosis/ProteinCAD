@@ -26,10 +26,10 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 1 completed, Milestone 2 ready
+- **Status**: Milestone 2 in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
 - **Current milestone**: Milestone 2 — evidence enrichment
-- **Next in-progress task**: define the normalized annotation/evidence record shape under `mcp-server/`
+- **Next in-progress task**: identify where `ipfs_datasets_py` is truly needed for non-BLAST source ingestion
 - **Primary edit targets**:
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_service.py`
@@ -39,10 +39,10 @@ If the snapshot is stale, update it before starting implementation work.
 - **Open decisions blocking deeper implementation**:
   - whether BLAST grounding is opt-in or enabled by default for design jobs
 - **Recommended first implementation slice**:
-  1. normalized annotation/evidence schema
-  2. accession/title/organism enrichment pipeline
-  3. evidence document generation with provenance columns
-  4. MCP-only retrieval endpoints/tools
+  1. document the `ipfs_datasets_py` boundary for non-BLAST ingestion
+  2. add optional Parquet export for enriched evidence batches
+  3. expose retrieval evidence through MCP/REST endpoints
+  4. add endpoint/tool tests around evidence packets
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -104,11 +104,11 @@ Goal: enable remote BLAST query submission and normalized hit persistence.
 
 Goal: turn BLAST hits into promptable evidence with provenance.
 
-- [ ] Define normalized annotation record shape
-- [ ] Add accession/title/organism enrichment pipeline
-- [ ] Add evidence document table and retention rules
-- [ ] Generate short evidence packets for MCP consumers
-- [ ] Add provenance columns for source system, source id, retrieval time, and transform version
+- [x] Define normalized annotation record shape
+- [x] Add accession/title/organism enrichment pipeline
+- [x] Add evidence document table and retention rules
+- [x] Generate short evidence packets for MCP consumers
+- [x] Add provenance columns for source system, source id, retrieval time, and transform version
 - [ ] Identify where `ipfs_datasets_py` is truly needed for non-BLAST source ingestion
 - [ ] Add optional Parquet export for enriched evidence batches
 
@@ -177,12 +177,12 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Define normalized annotation/evidence record shape
-2. [ ] Add accession/title/organism enrichment pipeline
-3. [ ] Add evidence document generation and provenance columns
-4. [ ] Add optional Parquet export for enriched evidence batches
-5. [ ] Add mocked tests for enrichment transforms
-6. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
+1. [ ] Identify where `ipfs_datasets_py` is truly needed for non-BLAST source ingestion
+2. [ ] Add optional Parquet export for enriched evidence batches
+3. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
+4. [ ] Add tests for MCP and REST retrieval flows using mocked BLAST responses
+5. [ ] Add dashboard retrieval settings/evidence rendering
+6. [ ] Add local BLAST+ provider support after the remote evidence path is stable
 
 ---
 
@@ -190,13 +190,14 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: Milestone 1 remote BLAST provider — provider abstraction, remote submit/poll flow, DuckDB persistence, cache reuse, and mocked tests
-- **Next recommended task**: define the normalized annotation/evidence record shape under `mcp-server/`
+- **Last completed task**: Milestone 2 evidence slice — normalized annotation records, accession/title/organism enrichment, evidence documents with provenance columns, and short evidence packets
+- **Next recommended task**: identify where `ipfs_datasets_py` is truly needed for non-BLAST source ingestion
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_service.py`
-  - `mcp-server/retrieval_provider.py`
+  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
+  - `mcp-server/server.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - decide whether BLAST grounding stays opt-in once MCP endpoints exist

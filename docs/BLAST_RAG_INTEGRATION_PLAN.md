@@ -24,7 +24,8 @@ The recommended rollout is incremental:
   - `mcp-server/retrieval_service.py`
   - `mcp-server/retrieval_store.py`
 - Remote retrieval currently covers NCBI BLAST `CMD=Put`, `CMD=Get` polling, DuckDB persistence, raw payload retention, alignment normalization, cache reuse, and mocked test coverage.
-- MCP/REST exposure and evidence-enrichment UX are still pending and should follow the daemon ledger order in `docs/BLAST_RAG_TODO.md`.
+- Milestone 2 now has a first enrichment slice: normalized annotation records, accession/title/organism enrichment, evidence documents with provenance fields, and short evidence packets are produced from cached BLAST hits.
+- Remaining work is focused on documenting the `ipfs_datasets_py` boundary, optional Parquet export, and exposing retrieval evidence through MCP/REST and dashboard UX.
 
 ---
 
