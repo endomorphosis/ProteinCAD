@@ -26,6 +26,9 @@ from retrieval_store import RetrievalStore
 from runtime_config import RetrievalConfig
 
 EVIDENCE_TRANSFORM_VERSION = "blast_evidence_v1"
+MAX_EVIDENCE_PACKET_SIZE = 5
+# Use a stable namespace so evidence IDs stay deterministic across cache refreshes.
+EVIDENCE_UUID_NAMESPACE = NAMESPACE_URL
 
 
 @dataclass(frozen=True)
@@ -45,10 +48,10 @@ class AnnotationRecord:
 @dataclass(frozen=True)
 class EvidenceDocument:
     evidence_id: str
-    run_id: str
-    hit_rank: int
-    source_system: str
-    source_id: str
+    run_id: Optional[str]
+    hit_rank: Optional[int]
+    source_system: Optional[str]
+    source_id: Optional[str]
     title: str
     content_text: str
     content: Dict[str, Any]
@@ -206,7 +209,7 @@ class BlastRetrievalService:
     def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
         evidence_documents = list(result.get("evidence_documents") or [])
         packet_documents = []
-        for evidence_document in evidence_documents[:5]:
+        for evidence_document in evidence_documents[:MAX_EVIDENCE_PACKET_SIZE]:
             packet_documents.append(
                 {
                     "evidence_id": evidence_document.get("evidence_id"),
@@ -241,7 +244,12 @@ class BlastRetrievalService:
         evidence_documents: list[EvidenceDocument] = []
         if self._config.feature_flags.evidence_enrichment:
             annotations = self._build_annotation_records(run_id, provider_result)
-            evidence_documents = self._build_evidence_documents(run_id, annotations, provider_result.hits)
+        evidence_documents = self._build_evidence_documents(
+            cache_key=provider_result.cache_key,
+            run_id=run_id,
+            annotations=annotations,
+            hits=provider_result.hits,
+        )
         for _search_info in provider_result.search_info_history[1:]:
             self._store.update_run_poll_timestamp(run_id)
         raw_payload_path = self._store.write_raw_payload(run_id, provider_result.raw_result)
@@ -304,13 +312,20 @@ class BlastRetrievalService:
 
     def _build_evidence_documents(
         self,
+        *,
+        cache_key: str,
         run_id: str,
         annotations: list[AnnotationRecord],
         hits: list[BlastHit],
     ) -> list[EvidenceDocument]:
+        if not annotations or not hits:
+            return []
+        if len(annotations) != len(hits):
+            raise RetrievalConfigError("Annotation enrichment produced mismatched hit and annotation counts")
+
         created_at = _utcnow_iso()
         evidence_documents: list[EvidenceDocument] = []
-        for annotation, hit in zip(annotations, hits):
+        for annotation, hit in zip(annotations, hits, strict=True):
             summary_parts = [f"BLAST hit #{hit.hit_rank}"]
             if hit.accession:
                 summary_parts.append(hit.accession)
@@ -320,9 +335,12 @@ class BlastRetrievalService:
             summary_parts.append(f"bit score {hit.bit_score:.1f}")
             if hit.e_value is not None:
                 summary_parts.append(f"e-value {hit.e_value:.2e}")
-            summary_parts.append(f"query coverage {hit.query_coverage:.1%}")
+            if hit.query_coverage is not None:
+                summary_parts.append(f"query coverage {hit.query_coverage:.1%}")
 
-            evidence_id = str(uuid5(NAMESPACE_URL, f"{run_id}:{annotation.source_id}:{hit.hit_rank}"))
+            stable_source_id = annotation.source_id or f"hit_{hit.hit_rank}"
+            # The enrichment profile is part of the cache identity, so profile changes intentionally mint new evidence IDs.
+            evidence_id = str(uuid5(EVIDENCE_UUID_NAMESPACE, f"{cache_key}:{stable_source_id}:{hit.hit_rank}"))
             evidence_documents.append(
                 EvidenceDocument(
                     evidence_id=evidence_id,

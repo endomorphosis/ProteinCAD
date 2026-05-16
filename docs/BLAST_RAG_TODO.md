@@ -198,7 +198,6 @@ Use this block at the end of each Copilot session. Replace the placeholders inst
   - `mcp-server/retrieval_service.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
   - `mcp-server/server.py`
-  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - decide whether BLAST grounding stays opt-in once MCP endpoints exist
 - **Validation to run next time**:

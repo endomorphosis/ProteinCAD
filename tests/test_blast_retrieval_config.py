@@ -4,6 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+import duckdb
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,12 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
     assert "blast_alignments" in tables
     assert "protein_annotations" in tables
     assert "dataset_manifests" in tables
+    with duckdb.connect(cfg.retrieval.storage.duckdb_path, read_only=True) as conn:
+        evidence_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('evidence_documents')").fetchall()
+        }
+    assert {"run_id", "hit_rank", "source_system", "source_id", "retrieved_at"} <= evidence_columns
     versions = store.migration_versions()
     assert 3 in versions
     assert max(versions) == 3

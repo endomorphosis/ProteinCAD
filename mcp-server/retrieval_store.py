@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 3
 
 SCHEMA_STATEMENTS = (
+    # Latest schema definition for fresh databases.
     """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -113,10 +114,10 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS evidence_documents (
         evidence_id VARCHAR PRIMARY KEY,
         request_id VARCHAR NOT NULL,
-        run_id VARCHAR NOT NULL,
+        run_id VARCHAR,
         hit_rank INTEGER,
-        source_system VARCHAR NOT NULL,
-        source_id VARCHAR NOT NULL,
+        source_system VARCHAR,
+        source_id VARCHAR,
         title TEXT,
         content_text TEXT,
         content_json TEXT,
@@ -152,13 +153,13 @@ SCHEMA_STATEMENTS = (
 )
 
 MIGRATION_STATEMENTS = (
+    # Schema version 2 -> 3 upgrade path for databases where evidence_documents already existed.
+    # Historical rows may retain NULL provenance fields until they are re-enriched and rewritten.
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS run_id VARCHAR",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS hit_rank INTEGER",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_system VARCHAR",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_id VARCHAR",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP",
-    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_kind VARCHAR",
-    "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_identifier VARCHAR",
 )
 
 
@@ -433,10 +434,9 @@ class RetrievalStore:
                         """
                         INSERT INTO evidence_documents (
                             evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
-                            content_text, content_json, transform_version, manifest_id, retrieved_at, created_at,
-                            source_kind, source_identifier
+                            content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             evidence_document["evidence_id"],
@@ -452,8 +452,6 @@ class RetrievalStore:
                             evidence_document.get("manifest_id"),
                             evidence_document.get("retrieved_at"),
                             evidence_document["created_at"],
-                            evidence_document.get("source_system"),
-                            evidence_document.get("source_id"),
                         ],
                     )
 
@@ -607,7 +605,7 @@ class RetrievalStore:
                            content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
                     FROM evidence_documents
                     WHERE request_id = ?
-                    ORDER BY hit_rank ASC NULLS LAST, created_at ASC
+                    ORDER BY hit_rank ASC NULLS LAST, created_at ASC NULLS LAST
                     """,
                     [request_id],
                 )
