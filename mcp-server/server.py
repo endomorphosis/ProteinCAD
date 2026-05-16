@@ -26,6 +26,7 @@ import logging
 from model_backends import BackendManager, EmbeddedBackend, allow_mock_outputs
 from runtime_config import RuntimeConfigManager
 from gpu_init import setup_gpu_for_server
+from retrieval_store import RetrievalStore
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Runtime config + backend manager (supports NIM/external/embedded + fallback)
 config_manager = RuntimeConfigManager()
 backend_manager = BackendManager(config_manager)
+retrieval_store = RetrievalStore(config_manager.get().retrieval)
 
 # Initialize GPU optimizations on startup
 logger.info("Initializing GPU optimizations...")
@@ -127,6 +129,10 @@ async def _startup_tasks() -> None:
         asyncio.create_task(_maybe_autobootstrap_embedded_assets())
     except Exception:
         pass
+    try:
+        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
+    except Exception:
+        pass
 
 
 @app.get("/api/config")
@@ -147,6 +153,9 @@ async def update_runtime_config(request: Request) -> Dict[str, Any]:
         updated = config_manager.update(patch)
         # Force backend rebuild on next use.
         _ = backend_manager.get()
+        global retrieval_store
+        retrieval_store = RetrievalStore(updated.retrieval)
+        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
         return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -160,6 +169,9 @@ async def reset_runtime_config() -> Dict[str, Any]:
     try:
         updated = config_manager.reset_to_defaults()
         _ = backend_manager.get()
+        global retrieval_store
+        retrieval_store = RetrievalStore(updated.retrieval)
+        await asyncio.to_thread(retrieval_store.initialize_if_enabled)
         return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -1035,9 +1047,12 @@ async def delete_job(job_id: str) -> Dict[str, str]:
 
 # Health check endpoints
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint"""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "retrieval": retrieval_store.diagnostics(),
+    }
 
 @app.get("/api/services/status")
 async def check_services() -> Dict[str, Any]:

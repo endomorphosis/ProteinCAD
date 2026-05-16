@@ -98,6 +98,24 @@ Users should be able to:
 
 ---
 
+## Initial Implementation Defaults
+
+To unblock the first implementation slice, use these defaults unless project requirements change:
+
+- BLAST provider: remote NCBI BLAST Common URL API
+- BLAST program preset: `blastp`
+- BLAST database preset: `swissprot`
+- default hitlist size: `25`
+- max hitlist size before explicit tuning: `100`
+- default poll interval: `5` seconds
+- default max poll attempts: `60`
+- default request timeout: `30` seconds
+- default DuckDB file: `MCP_RETRIEVAL_DUCKDB_PATH` or `MCP_RETRIEVAL_DATA_DIR/blast_retrieval.duckdb`
+
+These defaults should remain configurable through runtime config and environment overrides, but they are now the canonical bootstrap values for Milestone 0.
+
+---
+
 ## Proposed Architecture
 
 ### 1. Retrieval domain layer
@@ -335,6 +353,14 @@ Default policies:
 
 DuckDB should remain the default even if later phases add vector, graph, or IPFS-backed adjunct systems.
 
+Recommended Milestone 0 path layout:
+
+- `MCP_RETRIEVAL_DATA_DIR` for the retrieval working directory
+- `MCP_RETRIEVAL_DUCKDB_PATH` for the canonical DuckDB file
+- `MCP_RETRIEVAL_PARQUET_DIR` for reproducible Parquet exports
+- `MCP_RETRIEVAL_RAW_PAYLOAD_DIR` for raw BLAST response retention
+- `MCP_RETRIEVAL_MANIFEST_DIR` for dataset manifests and provenance bundles
+
 ---
 
 ## `ipfs_datasets_py` Usage Policy
@@ -353,6 +379,16 @@ Do not use it for:
 - features that can be satisfied entirely by DuckDB plus direct BLAST normalization
 
 This keeps the first release simpler while still leaving a clear path to richer ingestion workflows.
+
+### Session resume state
+
+Update resumable execution state in `docs/BLAST_RAG_TODO.md`, specifically:
+
+- `Supervisor Snapshot`
+- `Ordered Next Tasks`
+- `Session Handoff Notes`
+
+That keeps the todo daemon state durable across Copilot sessions without duplicating implementation notes in multiple docs.
 
 ---
 

@@ -24,6 +24,7 @@ from pydantic import ConfigDict
 
 ServiceName = Literal["alphafold", "rfdiffusion", "proteinmpnn", "alphafold_multimer"]
 ProviderName = Literal["nim", "external", "embedded"]
+RetrievalProviderName = Literal["ncbi_blast_remote", "local_blast"]
 
 
 def _truthy_env(name: str) -> bool:
@@ -37,6 +38,43 @@ def _resolve_env_url(key: str) -> Optional[str]:
     if not value or value.lower() in {"disabled", "none", "null"}:
         return None
     return value
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _default_retrieval_data_dir() -> str:
+    explicit = (os.getenv("MCP_RETRIEVAL_DATA_DIR") or "").strip()
+    if explicit:
+        return explicit
+    config_path = (os.getenv("MCP_CONFIG_PATH") or "").strip()
+    if config_path:
+        return str(Path(config_path).expanduser().resolve().parent / "retrieval")
+    return "/tmp/proteincad/retrieval"
+
+
+def _default_retrieval_duckdb_path() -> str:
+    explicit = (os.getenv("MCP_RETRIEVAL_DUCKDB_PATH") or "").strip()
+    if explicit:
+        return explicit
+    return str(Path(_default_retrieval_data_dir()) / "blast_retrieval.duckdb")
 
 
 def default_nim_urls() -> Dict[ServiceName, Optional[str]]:
@@ -188,6 +226,146 @@ def _apply_routing_env_overrides(cfg: "MCPServerConfig") -> bool:
     return changed
 
 
+def _apply_retrieval_env_overrides(cfg: "MCPServerConfig") -> bool:
+    """Apply runtime env overrides for BLAST retrieval config."""
+
+    changed = False
+    try:
+        feature_flag_bools = {
+            "MCP_RETRIEVAL_ENABLED": "enabled",
+            "MCP_RETRIEVAL_EXPOSE_REST": "expose_rest",
+            "MCP_RETRIEVAL_EXPOSE_MCP": "expose_mcp",
+            "MCP_RETRIEVAL_ENABLE_JOB_GROUNDING": "allow_job_grounding",
+            "MCP_RETRIEVAL_EVIDENCE_ENRICHMENT": "evidence_enrichment",
+            "MCP_RETRIEVAL_CREATE_SCHEMA_ON_STARTUP": "create_schema_on_startup",
+        }
+        for env_name, field_name in feature_flag_bools.items():
+            if env_name in os.environ:
+                value = _truthy_env(env_name)
+                if getattr(cfg.retrieval.feature_flags, field_name) != value:
+                    setattr(cfg.retrieval.feature_flags, field_name, value)
+                    changed = True
+
+        if "MCP_RETRIEVAL_PROVIDER" in os.environ:
+            provider = (os.getenv("MCP_RETRIEVAL_PROVIDER") or "").strip().lower()
+            if provider in {"ncbi_blast_remote", "local_blast"} and cfg.retrieval.provider != provider:
+                cfg.retrieval.provider = provider  # type: ignore[assignment]
+                changed = True
+
+        string_overrides = {
+            "MCP_RETRIEVAL_REMOTE_BASE_URL": ("blast", "remote_base_url"),
+            "MCP_RETRIEVAL_PROGRAM": ("blast", "default_program"),
+            "MCP_RETRIEVAL_DATABASE": ("blast", "default_database"),
+            "MCP_RETRIEVAL_DUCKDB_PATH": ("storage", "duckdb_path"),
+            "MCP_RETRIEVAL_PARQUET_DIR": ("storage", "parquet_export_dir"),
+            "MCP_RETRIEVAL_RAW_PAYLOAD_DIR": ("storage", "raw_payload_dir"),
+            "MCP_RETRIEVAL_MANIFEST_DIR": ("storage", "manifest_dir"),
+        }
+        for env_name, (section_name, field_name) in string_overrides.items():
+            if env_name in os.environ:
+                value = (os.getenv(env_name) or "").strip()
+                section = getattr(cfg.retrieval, section_name)
+                if value and getattr(section, field_name) != value:
+                    setattr(section, field_name, value)
+                    changed = True
+
+        if "MCP_RETRIEVAL_DATA_DIR" in os.environ:
+            data_dir = (os.getenv("MCP_RETRIEVAL_DATA_DIR") or "").strip()
+            if data_dir and cfg.retrieval.storage.data_dir != data_dir:
+                cfg.retrieval.storage.data_dir = data_dir
+                changed = True
+            if data_dir and "MCP_RETRIEVAL_DUCKDB_PATH" not in os.environ:
+                duckdb_path = str(Path(data_dir) / "blast_retrieval.duckdb")
+                if cfg.retrieval.storage.duckdb_path != duckdb_path:
+                    cfg.retrieval.storage.duckdb_path = duckdb_path
+                    changed = True
+            derived_dirs = {
+                "parquet_export_dir": str(Path(data_dir) / "parquet"),
+                "raw_payload_dir": str(Path(data_dir) / "raw_payloads"),
+                "manifest_dir": str(Path(data_dir) / "manifests"),
+            }
+            env_map = {
+                "parquet_export_dir": "MCP_RETRIEVAL_PARQUET_DIR",
+                "raw_payload_dir": "MCP_RETRIEVAL_RAW_PAYLOAD_DIR",
+                "manifest_dir": "MCP_RETRIEVAL_MANIFEST_DIR",
+            }
+            for field_name, derived_value in derived_dirs.items():
+                if data_dir and env_map[field_name] not in os.environ and getattr(cfg.retrieval.storage, field_name) != derived_value:
+                    setattr(cfg.retrieval.storage, field_name, derived_value)
+                    changed = True
+
+        int_overrides = {
+            "MCP_RETRIEVAL_HITLIST_SIZE": ("blast", "default_hitlist_size"),
+            "MCP_RETRIEVAL_MAX_HITLIST_SIZE": ("blast", "max_hitlist_size"),
+            "MCP_RETRIEVAL_MAX_POLL_ATTEMPTS": ("blast", "max_poll_attempts"),
+        }
+        for env_name, (section_name, field_name) in int_overrides.items():
+            if env_name in os.environ:
+                raw = (os.getenv(env_name) or "").strip()
+                try:
+                    value = int(raw)
+                except ValueError:
+                    continue
+                section = getattr(cfg.retrieval, section_name)
+                if getattr(section, field_name) != value:
+                    setattr(section, field_name, value)
+                    changed = True
+
+        float_overrides = {
+            "MCP_RETRIEVAL_POLL_INTERVAL_S": ("blast", "poll_interval_seconds"),
+            "MCP_RETRIEVAL_REQUEST_TIMEOUT_S": ("blast", "request_timeout_seconds"),
+        }
+        for env_name, (section_name, field_name) in float_overrides.items():
+            if env_name in os.environ:
+                raw = (os.getenv(env_name) or "").strip()
+                try:
+                    value = float(raw)
+                except ValueError:
+                    continue
+                section = getattr(cfg.retrieval, section_name)
+                if getattr(section, field_name) != value:
+                    setattr(section, field_name, value)
+                    changed = True
+    except Exception:
+        return changed
+
+    return changed
+
+
+def _apply_retrieval_path_defaults(cfg: "MCPServerConfig", config_path: Optional[Path]) -> bool:
+    """Derive retrieval storage defaults from the persisted config location."""
+
+    if not config_path:
+        return False
+    if any(
+        env_name in os.environ
+        for env_name in {
+            "MCP_RETRIEVAL_DATA_DIR",
+            "MCP_RETRIEVAL_DUCKDB_PATH",
+            "MCP_RETRIEVAL_PARQUET_DIR",
+            "MCP_RETRIEVAL_RAW_PAYLOAD_DIR",
+            "MCP_RETRIEVAL_MANIFEST_DIR",
+        }
+    ):
+        return False
+
+    retrieval_root = config_path.expanduser().resolve().parent / "retrieval"
+    storage = cfg.retrieval.storage
+    changed = False
+    desired_values = {
+        "data_dir": str(retrieval_root),
+        "duckdb_path": str(retrieval_root / "blast_retrieval.duckdb"),
+        "parquet_export_dir": str(retrieval_root / "parquet"),
+        "raw_payload_dir": str(retrieval_root / "raw_payloads"),
+        "manifest_dir": str(retrieval_root / "manifests"),
+    }
+    for field_name, expected in desired_values.items():
+        if getattr(storage, field_name) != expected:
+            setattr(storage, field_name, expected)
+            changed = True
+    return changed
+
+
 def default_external_urls() -> Dict[ServiceName, Optional[str]]:
     # Optional secondary URL set for non-NIM model services.
     return {
@@ -267,6 +445,49 @@ class EmbeddedConfig(BaseModel):
     runners: EmbeddedRunners = Field(default_factory=EmbeddedRunners)
 
 
+class RetrievalFeatureFlags(BaseModel):
+    enabled: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_ENABLED"))
+    expose_rest: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPOSE_REST"))
+    expose_mcp: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPOSE_MCP"))
+    allow_job_grounding: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING"))
+    evidence_enrichment: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EVIDENCE_ENRICHMENT"))
+    create_schema_on_startup: bool = Field(
+        default_factory=lambda: (os.getenv("MCP_RETRIEVAL_CREATE_SCHEMA_ON_STARTUP") or "").strip().lower() not in {"0", "false", "no", "off"}
+    )
+
+
+class RetrievalBlastConfig(BaseModel):
+    remote_base_url: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_REMOTE_BASE_URL") or "").strip() or "https://blast.ncbi.nlm.nih.gov/Blast.cgi")
+    default_program: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_PROGRAM") or "").strip() or "blastp")
+    default_database: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_DATABASE") or "").strip() or "swissprot")
+    default_hitlist_size: int = Field(default_factory=lambda: max(1, _env_int("MCP_RETRIEVAL_HITLIST_SIZE", 25)))
+    max_hitlist_size: int = Field(default_factory=lambda: max(1, _env_int("MCP_RETRIEVAL_MAX_HITLIST_SIZE", 100)))
+    poll_interval_seconds: float = Field(default_factory=lambda: max(1.0, _env_float("MCP_RETRIEVAL_POLL_INTERVAL_S", 5.0)))
+    max_poll_attempts: int = Field(default_factory=lambda: max(1, _env_int("MCP_RETRIEVAL_MAX_POLL_ATTEMPTS", 60)))
+    request_timeout_seconds: float = Field(default_factory=lambda: max(1.0, _env_float("MCP_RETRIEVAL_REQUEST_TIMEOUT_S", 30.0)))
+
+
+class RetrievalStorageConfig(BaseModel):
+    data_dir: str = Field(default_factory=_default_retrieval_data_dir)
+    duckdb_path: str = Field(default_factory=_default_retrieval_duckdb_path)
+    parquet_export_dir: str = Field(default_factory=lambda: str(Path(_default_retrieval_data_dir()) / "parquet"))
+    raw_payload_dir: str = Field(default_factory=lambda: str(Path(_default_retrieval_data_dir()) / "raw_payloads"))
+    manifest_dir: str = Field(default_factory=lambda: str(Path(_default_retrieval_data_dir()) / "manifests"))
+
+
+class RetrievalConfig(BaseModel):
+    provider: RetrievalProviderName = Field(
+        default_factory=lambda: (
+            (os.getenv("MCP_RETRIEVAL_PROVIDER") or "").strip().lower()
+            if (os.getenv("MCP_RETRIEVAL_PROVIDER") or "").strip().lower() in {"ncbi_blast_remote", "local_blast"}
+            else "ncbi_blast_remote"
+        )
+    )
+    feature_flags: RetrievalFeatureFlags = Field(default_factory=RetrievalFeatureFlags)
+    blast: RetrievalBlastConfig = Field(default_factory=RetrievalBlastConfig)
+    storage: RetrievalStorageConfig = Field(default_factory=RetrievalStorageConfig)
+
+
 class RoutingConfig(BaseModel):
     mode: Literal["single", "fallback"] = "fallback"
 
@@ -278,13 +499,14 @@ class RoutingConfig(BaseModel):
 
 
 class MCPServerConfig(BaseModel):
-    version: int = 3
+    version: int = 4
 
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
 
     nim: ProviderConfig = Field(default_factory=lambda: ProviderConfig(service_urls=default_nim_urls()))
     external: ProviderConfig = Field(default_factory=lambda: ProviderConfig(service_urls=default_external_urls()))
     embedded: EmbeddedConfig = Field(default_factory=EmbeddedConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
 
     # Safety: allow runtime config edits. Defaults on for local stacks.
     allow_runtime_updates: bool = Field(default_factory=lambda: not _truthy_env("MCP_CONFIG_READONLY"))
@@ -295,10 +517,14 @@ class RuntimeConfigManager:
         self.path = Path(path) if path else Path(os.getenv("MCP_CONFIG_PATH", "").strip() or "")
         self._config = MCPServerConfig()
         self._revision = 0
+        if _apply_retrieval_path_defaults(self._config, self.path if self.path else None):
+            self._revision += 1
         # Apply env overrides to the initial in-memory defaults.
         if _apply_routing_env_overrides(self._config):
             self._revision += 1
         if _apply_embedded_env_overrides(self._config):
+            self._revision += 1
+        if _apply_retrieval_env_overrides(self._config):
             self._revision += 1
         self._load_from_disk_if_present()
 
@@ -340,6 +566,8 @@ class RuntimeConfigManager:
 
             if _apply_routing_env_overrides(self._config):
                 self._revision += 1
+            if _apply_retrieval_env_overrides(self._config):
+                self._revision += 1
         except Exception:
             # Keep defaults if config file is invalid.
             return
@@ -373,6 +601,14 @@ class RuntimeConfigManager:
         if not self._config.allow_runtime_updates:
             raise PermissionError("Runtime config updates are disabled (MCP_CONFIG_READONLY=1)")
         self._config = MCPServerConfig()
+        if _apply_retrieval_path_defaults(self._config, self.path if self.path else None):
+            self._revision += 1
+        if _apply_routing_env_overrides(self._config):
+            self._revision += 1
+        if _apply_embedded_env_overrides(self._config):
+            self._revision += 1
+        if _apply_retrieval_env_overrides(self._config):
+            self._revision += 1
         self._revision += 1
         self._persist()
         return self._config

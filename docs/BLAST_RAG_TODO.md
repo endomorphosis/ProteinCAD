@@ -26,23 +26,22 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: planned, not implemented
+- **Status**: Milestone 0 completed, Milestone 1 ready
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 0 — implementation scaffolding
-- **Next in-progress task**: define retrieval runtime config schema and DuckDB storage layout
+- **Current milestone**: Milestone 1 — remote BLAST provider
+- **Next in-progress task**: add a retrieval provider abstraction under `mcp-server/`
 - **Primary edit targets**:
-  - `mcp-server/runtime_config.py`
   - `mcp-server/server.py`
-  - `mcp-dashboard/components/BackendSettings.tsx`
+  - `mcp-server/retrieval_store.py`
+  - `mcp-server/runtime_config.py`
+  - `mcp-server/model_backends.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
-  - initial BLAST program preset (`blastp` is likely default, but should be confirmed)
-  - initial target database preset (`nr` vs `swissprot`)
   - whether BLAST grounding is opt-in or enabled by default for design jobs
 - **Recommended first implementation slice**:
-  1. config schema
-  2. DuckDB schema
-  3. remote BLAST provider
+  1. remote BLAST provider abstraction
+  2. remote submission/polling against NCBI BLAST
+  3. raw payload persistence plus normalized hit writes
   4. MCP-only endpoints/tools
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
@@ -65,12 +64,12 @@ Treat this document as the durable task ledger for BLAST RAG work.
 
 Goal: establish the minimal structure needed to start real implementation without changing runtime behavior yet.
 
-- [ ] Add retrieval settings models to `mcp-server/runtime_config.py`
-- [ ] Decide and document initial BLAST presets (`program`, `database`, `hitlist_size`, polling/backoff defaults)
-- [ ] Define DuckDB file location and environment/config keys
-- [ ] Create retrieval schema/migration module for DuckDB tables
-- [ ] Add retrieval feature flag(s) so the subsystem can stay dark by default
-- [ ] Add a small `docs/` section describing where resumption state should be updated after each session
+- [x] Add retrieval settings models to `mcp-server/runtime_config.py`
+- [x] Decide and document initial BLAST presets (`program`, `database`, `hitlist_size`, polling/backoff defaults)
+- [x] Define DuckDB file location and environment/config keys
+- [x] Create retrieval schema/migration module for DuckDB tables
+- [x] Add retrieval feature flag(s) so the subsystem can stay dark by default
+- [x] Add a small `docs/` section describing where resumption state should be updated after each session
 
 ### Exit criteria
 
@@ -178,10 +177,10 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Add retrieval config models to `mcp-server/runtime_config.py`
-2. [ ] Add retrieval defaults and environment overrides
-3. [ ] Create DuckDB schema module and migration bootstrap
-4. [ ] Add remote BLAST provider interface and placeholder wiring
+1. [ ] Add remote BLAST provider interface and placeholder wiring
+2. [ ] Implement NCBI BLAST `CMD=Put` submission and `RID`/`RTOE` capture
+3. [ ] Implement `CMD=Get` polling with bounded retries/backoff
+4. [ ] Persist raw BLAST payloads plus normalized hits into DuckDB
 5. [ ] Add mocked tests for BLAST response parsing and polling
 6. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
 
@@ -191,15 +190,17 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: none yet
-- **Next recommended task**: add retrieval config models to `mcp-server/runtime_config.py`
+- **Last completed task**: Milestone 0 scaffolding — runtime config, DuckDB schema bootstrap, feature flags, and resume-state docs
+- **Next recommended task**: add a retrieval provider abstraction under `mcp-server/`
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
+  - `mcp-server/retrieval_store.py`
   - `mcp-server/runtime_config.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
-  - confirm default BLAST presets for proteins
+  - decide whether BLAST grounding stays opt-in once MCP endpoints exist
 - **Validation to run next time**:
-  - targeted Python tests for new retrieval modules once they exist
+  - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_blast_retrieval_config.py`
+  - `docker build -t test-mcp-server /home/runner/work/ProteinCAD/ProteinCAD/mcp-server`
 
 Keep this section current so a new Copilot session can resume work quickly without re-deriving project context.
