@@ -25,7 +25,8 @@ The recommended rollout is incremental:
   - `mcp-server/retrieval_store.py`
 - Remote retrieval currently covers NCBI BLAST `CMD=Put`, `CMD=Get` polling, DuckDB persistence, raw payload retention, alignment normalization, cache reuse, and mocked test coverage.
 - Milestone 2 now has a first enrichment slice: normalized annotation records, accession/title/organism enrichment, evidence documents with provenance fields, and short evidence packets are produced from cached BLAST hits.
-- Remaining work is focused on documenting the `ipfs_datasets_py` boundary, optional Parquet export, and exposing retrieval evidence through MCP/REST and dashboard UX.
+- The `ipfs_datasets_py` boundary is now defined: BLAST query-time retrieval, caching, normalization, and evidence packets stay in the MCP server; only non-BLAST scraping, heterogeneous ETL, Parquet packaging, and optional IPFS publication should cross into `ipfs_datasets_py`.
+- Remaining work is focused on optional Parquet export plus exposing retrieval evidence through MCP/REST and dashboard UX.
 
 ---
 
@@ -392,6 +393,25 @@ Do not use it for:
 - features that can be satisfied entirely by DuckDB plus direct BLAST normalization
 
 This keeps the first release simpler while still leaving a clear path to richer ingestion workflows.
+
+### Current repository boundary
+
+For the current ProteinCAD repository layout, the boundary should be:
+
+| Keep in ProteinCAD / `mcp-server` | Defer to `ipfs_datasets_py` only when needed |
+|---|---|
+| NCBI BLAST `CMD=Put` / `CMD=Get` query execution | scraping non-BLAST evidence pages or portals |
+| DuckDB request/run/hit/alignment persistence | custom extraction from HTML, PDFs, or mixed upstream formats |
+| annotation and evidence packet generation from normalized BLAST hits | conversion of scraped corpora into Parquet/JSONL datasets |
+| cache lookup, raw payload retention, and MCP/REST-facing evidence reads | packaging reusable dataset bundles or publishing optional IPFS-backed manifests |
+| local manifest bookkeeping in `dataset_manifests` and `MCP_RETRIEVAL_MANIFEST_DIR` | standalone ETL jobs that run outside the live retrieval request path |
+
+Concretely, that means:
+
+- `mcp-server/retrieval_provider.py`, `mcp-server/retrieval_service.py`, and `mcp-server/retrieval_store.py` remain the runtime path for live BLAST retrieval.
+- `dataset_manifests`, `MCP_RETRIEVAL_PARQUET_DIR`, and `MCP_RETRIEVAL_MANIFEST_DIR` are local staging/provenance hooks first, not a requirement to adopt `ipfs_datasets_py` immediately.
+- The first time this repository should add an `ipfs_datasets_py` bridge is when enrichment depends on non-BLAST sources that cannot be ingested cleanly from structured API payloads already normalized inside the MCP server.
+- Parquet export can be implemented inside ProteinCAD first; only dataset sharing, offline mirroring, or content-addressed publication should require handing the batch off to `ipfs_datasets_py`.
 
 ### Session resume state
 
