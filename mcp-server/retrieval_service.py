@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 from uuid import uuid4
 
 import httpx
@@ -45,7 +46,7 @@ class BlastRetrievalService:
         config: RetrievalConfig,
         store: RetrievalStore,
         transport: Optional[httpx.AsyncBaseTransport] = None,
-        sleeper=None,
+        sleeper: Optional[Callable[[float], Awaitable[None]]] = None,
     ) -> None:
         self._config = config
         self._store = store
@@ -113,7 +114,7 @@ class BlastRetrievalService:
                 request_id=request_id,
                 provider=self._provider.provider_name,
                 remote_request_id=submission.remote_request_id,
-                remote_queue_hint_seconds=float(submission.remote_queue_hint_seconds),
+                remote_queue_hint_seconds=submission.remote_queue_hint_seconds,
             )
             self._store.update_request_status(request_id, "running")
             provider_result = await self._provider.collect_results(query, submission)
@@ -127,7 +128,7 @@ class BlastRetrievalService:
                 cached=False,
                 status="completed",
                 remote_request_id=provider_result.submission.remote_request_id,
-                remote_queue_hint_seconds=float(provider_result.submission.remote_queue_hint_seconds),
+                remote_queue_hint_seconds=provider_result.submission.remote_queue_hint_seconds,
                 raw_payload_path=(result.get("runs") or [{}])[-1].get("raw_payload_path"),
                 hit_count=len(provider_result.hits),
                 result=result,
@@ -166,7 +167,7 @@ class BlastRetrievalService:
         for _search_info in provider_result.search_info_history[1:]:
             self._store.update_run_poll_timestamp(run_id)
         raw_payload_path = self._store.write_raw_payload(run_id, provider_result.raw_result)
-        raw_payload_json = {
+        raw_payload_dict = {
             "submission": asdict(submission),
             "search_info_history": provider_result.search_info_history,
             "hit_count": len(provider_result.hits),
@@ -174,7 +175,7 @@ class BlastRetrievalService:
         }
         self._store.complete_run(
             run_id,
-            raw_payload_json=json_dumps(raw_payload_json),
+            raw_payload_json=json_dumps(raw_payload_dict),
             raw_payload_path=raw_payload_path,
         )
         self._store.replace_hits(run_id, serialize_hits(provider_result.hits))
@@ -190,6 +191,4 @@ class BlastRetrievalService:
 
 
 def json_dumps(payload: Dict[str, Any]) -> str:
-    import json
-
     return json.dumps(payload, sort_keys=True)

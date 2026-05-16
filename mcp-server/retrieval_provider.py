@@ -91,7 +91,7 @@ class BlastHit:
     accession: Optional[str]
     title: str
     organism: Optional[str]
-    e_value: float
+    e_value: Optional[float]
     bit_score: float
     identity_fraction: float
     positives_fraction: float
@@ -114,12 +114,7 @@ class ProviderExecutionResult:
 
 
 def normalize_sequence(sequence: str) -> str:
-    lines = []
-    for raw_line in sequence.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith(">"):
-            continue
-        lines.append(line)
+    lines = [line.strip() for line in sequence.splitlines() if line.strip() and not line.strip().startswith(">")]
     normalized = "".join(lines).replace(" ", "").upper()
     if not normalized:
         raise RetrievalConfigError("BLAST retrieval requires a non-empty amino-acid sequence")
@@ -191,6 +186,8 @@ def parse_search_info(payload: str) -> Dict[str, Any]:
 
 
 def _extract_organism(title: str) -> tuple[str, Optional[str]]:
+    """Split `Example protein [Organism]` BLAST titles into title and organism."""
+
     match = _ORGANISM_SUFFIX_RE.search(title)
     if not match:
         return title, None
@@ -217,7 +214,7 @@ def parse_blast_xml(payload: str, *, query_length: int) -> tuple[List[BlastHit],
 
         best_alignment_length = 0
         best_bit_score = 0.0
-        best_evalue = float("inf")
+        best_evalue: Optional[float] = None
         best_identity_fraction = 0.0
         best_positives_fraction = 0.0
         best_query_coverage = 0.0
@@ -280,7 +277,7 @@ def parse_blast_xml(payload: str, *, query_length: int) -> tuple[List[BlastHit],
                 accession=accession,
                 title=title or title_text or accession or f"hit_{hit_rank}",
                 organism=organism,
-                e_value=best_evalue if best_evalue != float("inf") else 0.0,
+                e_value=best_evalue,
                 bit_score=best_bit_score,
                 identity_fraction=best_identity_fraction,
                 positives_fraction=best_positives_fraction,
@@ -434,10 +431,9 @@ class NCBIBlastRemoteProvider(RetrievalProvider):
                     alignments=alignments,
                     search_info_history=search_info_history,
                 )
-
-        raise RetrievalTimeoutError(
-            f"Remote BLAST request exceeded {query.max_poll_attempts} polling attempts"
-        )
+            raise RetrievalTimeoutError(
+                f"Remote BLAST request exceeded {query.max_poll_attempts} polling attempts"
+            )
 
 
 def provider_from_config(

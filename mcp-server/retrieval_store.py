@@ -135,12 +135,6 @@ SCHEMA_STATEMENTS = (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _row_to_dict(columns: List[str], row: Iterable[Any]) -> Dict[str, Any]:
-    return {column: value for column, value in zip(columns, row)}
-
-
 @dataclass
 class RetrievalStore:
     config: RetrievalConfig
@@ -162,8 +156,12 @@ class RetrievalStore:
             Path(raw_path).expanduser().mkdir(parents=True, exist_ok=True)
 
     def _connect(self, *, read_only: bool = False) -> duckdb.DuckDBPyConnection:
-        self._ensure_parent_dirs()
+        if not read_only:
+            self._ensure_parent_dirs()
         return duckdb.connect(str(self._duckdb_path()), read_only=read_only)
+
+    def _row_to_dict(self, columns: List[str], row: Iterable[Any]) -> Dict[str, Any]:
+        return dict(zip(columns, row))
 
     def ensure_schema(self) -> None:
         with self._lock:
@@ -433,7 +431,7 @@ class RetrievalStore:
                 if not request_row:
                     return None
                 request_cols = [desc[0] for desc in request_cur.description]
-                request_data = _row_to_dict(request_cols, request_row)
+                request_data = self._row_to_dict(request_cols, request_row)
                 if isinstance(request_data.get("request_params_json"), str):
                     request_data["request_params"] = json.loads(request_data.pop("request_params_json"))
 
@@ -448,7 +446,7 @@ class RetrievalStore:
                     [request_id],
                 )
                 run_cols = [desc[0] for desc in runs_cur.description]
-                runs = [_row_to_dict(run_cols, row) for row in runs_cur.fetchall()]
+                runs = [self._row_to_dict(run_cols, row) for row in runs_cur.fetchall()]
                 if not runs:
                     return {**request_data, "runs": [], "hits": [], "alignments": []}
 
@@ -465,7 +463,7 @@ class RetrievalStore:
                     [latest_run_id],
                 )
                 hit_cols = [desc[0] for desc in hits_cur.description]
-                hits = [_row_to_dict(hit_cols, row) for row in hits_cur.fetchall()]
+                hits = [self._row_to_dict(hit_cols, row) for row in hits_cur.fetchall()]
                 for hit in hits:
                     if isinstance(hit.get("raw_hit_json"), str):
                         hit["raw_hit"] = json.loads(hit.pop("raw_hit_json"))
@@ -483,7 +481,7 @@ class RetrievalStore:
                     [latest_run_id],
                 )
                 align_cols = [desc[0] for desc in align_cur.description]
-                alignments = [_row_to_dict(align_cols, row) for row in align_cur.fetchall()]
+                alignments = [self._row_to_dict(align_cols, row) for row in align_cur.fetchall()]
                 for alignment in alignments:
                     if isinstance(alignment.get("raw_alignment_json"), str):
                         alignment["raw_alignment"] = json.loads(alignment.pop("raw_alignment_json"))

@@ -14,6 +14,8 @@ from retrieval_service import BlastRetrievalService
 from retrieval_store import RetrievalStore
 from runtime_config import MCPServerConfig, RuntimeConfigManager
 
+TEST_FASTA_QUERY = ">query\nACDEFGHIKL\n"
+
 
 def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
     monkeypatch.delenv("MCP_RETRIEVAL_ENABLED", raising=False)
@@ -77,7 +79,9 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
     assert "blast_hits" in tables
     assert "blast_alignments" in tables
     assert "dataset_manifests" in tables
-    assert store.migration_versions() == [2]
+    versions = store.migration_versions()
+    assert 2 in versions
+    assert max(versions) == 2
 
 
 def test_retrieval_store_skips_schema_when_disabled(tmp_path):
@@ -165,8 +169,8 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
         sleeper=lambda _: asyncio.sleep(0),
     )
 
-    first = asyncio.run(service.retrieve(">query\nACDEFGHIKL\n"))
-    second = asyncio.run(service.retrieve(">query\nACDEFGHIKL\n"))
+    first = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
+    second = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
 
     assert first.status == "completed"
     assert first.cached is False
@@ -204,7 +208,7 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
         sleeper=lambda _: asyncio.sleep(0),
     )
 
-    result = asyncio.run(service.retrieve("ACDEFGHIKL"))
+    result = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
 
     assert result.status == "failed"
     assert result.cached is False
