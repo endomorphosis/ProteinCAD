@@ -522,12 +522,13 @@ class RetrievalStore:
         manifest_id = f"{request_id}_parquet"
         bundle_root = Path(self.config.storage.parquet_export_dir).expanduser()
         bundle_dir = bundle_root / request_id
-        temp_bundle_dir = Path(
-            tempfile.mkdtemp(prefix="parquet-export-", dir=str(bundle_root))
-        )
         manifest_path = Path(self.config.storage.manifest_dir).expanduser() / f"{manifest_id}.json"
         temp_manifest_path = manifest_path.with_suffix(".tmp.json")
         self._ensure_parent_dirs()
+        temp_bundle_dir: Optional[Path] = None
+        temp_bundle_dir = Path(
+            tempfile.mkdtemp(prefix="parquet-export-", dir=str(bundle_root))
+        )
 
         parquet_files = {
             "request": str(temp_bundle_dir / "request.parquet"),
@@ -633,7 +634,7 @@ class RetrievalStore:
                         [request_id, request_id, request_id, request_id, request_id],
                     ).fetchone()
         except Exception:
-            if temp_bundle_dir.exists():
+            if temp_bundle_dir and temp_bundle_dir.exists():
                 shutil.rmtree(temp_bundle_dir)
             if temp_manifest_path.exists():
                 temp_manifest_path.unlink()

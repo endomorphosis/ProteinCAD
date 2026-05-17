@@ -303,7 +303,12 @@ def test_remote_retrieval_service_exports_parquet_without_evidence_documents(tmp
         "SELECT COUNT(*) FROM read_parquet(?)",
         [manifest["manifest"]["parquet_files"]["evidence_documents"]],
     ).fetchone()[0]
+    hit_count = duckdb.execute(
+        "SELECT COUNT(*) FROM read_parquet(?)",
+        [manifest["manifest"]["parquet_files"]["hits"]],
+    ).fetchone()[0]
     assert evidence_count == 0
+    assert hit_count == 1
 
 
 def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
