@@ -26,6 +26,8 @@ const exampleSequences = [
     numDesigns: 8,
   },
 ]
+const RETRIEVAL_HITLIST_MIN = 1
+const RETRIEVAL_HITLIST_MAX = 100
 
 export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
   const [formData, setFormData] = useState<ProteinSequenceInput>({
@@ -235,14 +237,17 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
               Hitlist size
               <input
                 type="number"
-                min={1}
-                max={100}
+                min={RETRIEVAL_HITLIST_MIN}
+                max={RETRIEVAL_HITLIST_MAX}
                 value={formData.retrieval_hitlist_size ?? 25}
                 onChange={(event) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    retrieval_hitlist_size: Number.parseInt(event.target.value || '25', 10) || 25,
-                  }))
+                  setFormData((prev) => {
+                    const parsed = Number.parseInt(event.target.value, 10)
+                    return {
+                      ...prev,
+                      retrieval_hitlist_size: Number.isNaN(parsed) ? 25 : parsed,
+                    }
+                  })
                 }
                 className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"
               />

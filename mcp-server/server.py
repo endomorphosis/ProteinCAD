@@ -13,6 +13,7 @@ import os
 import json
 import asyncio
 import contextlib
+from itertools import chain
 from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -245,27 +246,27 @@ def _normalize_retrieval_payload(
     transform_versions = sorted(
         {
             str(version).strip()
-            for version in [
-                *[annotation.get("transform_version") for annotation in annotations],
-                *[evidence.get("transform_version") for evidence in evidence_documents],
-            ]
+            for version in chain(
+                (annotation.get("transform_version") for annotation in annotations),
+                (evidence.get("transform_version") for evidence in evidence_documents),
+            )
             if version
         }
     )
     retrieved_times = sorted(
         [
             str(ts)
-            for ts in [*[
-                annotation.get("retrieved_at") for annotation in annotations
-            ], *[
-                evidence.get("retrieved_at") for evidence in evidence_documents
-            ]]
+            for ts in chain(
+                (annotation.get("retrieved_at") for annotation in annotations),
+                (evidence.get("retrieved_at") for evidence in evidence_documents),
+            )
             if ts
         ]
     )
 
     status = payload.get("status") or "unknown"
-    effective_cached = bool(cached) if cached is not None else (status == "completed" and bool(payload.get("cache_key")))
+    is_implicitly_cached = status == "completed" and bool(payload.get("cache_key"))
+    effective_cached = bool(cached) if cached is not None else is_implicitly_cached
     return {
         "request_id": request_id,
         "run_id": run_id_override or latest_run.get("run_id"),
@@ -1679,7 +1680,7 @@ async def process_job(job_id: str):
                 retrieval_state["started_at"] = datetime.now().isoformat()
                 _job_set_progress(job, stage="retrieval", pct=2, message="Running BLAST retrieval grounding")
                 try:
-                    asyncio.create_task(broadcast_event({"type": "job.updated", "job": _public_job_dict(job)}))
+                    await broadcast_event({"type": "job.updated", "job": _public_job_dict(job)})
                 except Exception:
                     pass
                 retrieval_input = job.get("input", {}).get("retrieval", {})
@@ -1691,7 +1692,7 @@ async def process_job(job_id: str):
                         hitlist_size=retrieval_input.get("hitlist_size"),
                     )
                     normalized_retrieval = _normalize_retrieval_result(retrieval_result)
-                    retrieval_state["status"] = "completed" if not normalized_retrieval.get("cached") else "cached"
+                    retrieval_state["status"] = "cached" if normalized_retrieval.get("cached") else "completed"
                     retrieval_state["message"] = (
                         "BLAST retrieval reused cached evidence"
                         if normalized_retrieval.get("cached")
@@ -1712,7 +1713,7 @@ async def process_job(job_id: str):
                     retrieval_state["completed_at"] = datetime.now().isoformat()
                     _job_set_progress(job, stage="retrieval", pct=8, message=retrieval_state["message"])
                 try:
-                    asyncio.create_task(broadcast_event({"type": "job.updated", "job": _public_job_dict(job)}))
+                    await broadcast_event({"type": "job.updated", "job": _public_job_dict(job)})
                 except Exception:
                     pass
 

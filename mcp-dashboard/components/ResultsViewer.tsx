@@ -245,7 +245,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
     if (hitSort === 'score') {
       ranked.sort((a, b) => Number(b.bit_score || 0) - Number(a.bit_score || 0))
     } else if (hitSort === 'evalue') {
-      ranked.sort((a, b) => Number(a.e_value || Number.MAX_VALUE) - Number(b.e_value || Number.MAX_VALUE))
+      ranked.sort((a, b) => Number(a.e_value ?? Infinity) - Number(b.e_value ?? Infinity))
     } else {
       ranked.sort((a, b) => Number(a.hit_rank || 0) - Number(b.hit_rank || 0))
     }
@@ -421,7 +421,13 @@ export default function ResultsViewer({ job, onIterate }: Props) {
                           <tr key={`${hit.accession || 'hit'}-${index}`} className="border-t border-white/5">
                             <td className="py-1 pr-2">{hit.hit_rank ?? index + 1}</td>
                             <td className="py-1 pr-2">{hit.accession || 'n/a'}</td>
-                            <td className="py-1 pr-2 max-w-[240px] truncate">{hit.title || 'n/a'}</td>
+                            <td
+                              className="py-1 pr-2 max-w-[240px] truncate"
+                              title={hit.title || 'n/a'}
+                              aria-label={hit.title || 'n/a'}
+                            >
+                              {hit.title || 'n/a'}
+                            </td>
                             <td className="py-1 pr-2">{hit.organism || 'n/a'}</td>
                             <td className="py-1 pr-2">{typeof hit.bit_score === 'number' ? hit.bit_score.toFixed(1) : 'n/a'}</td>
                             <td className="py-1">{typeof hit.e_value === 'number' ? hit.e_value.toExponential(2) : 'n/a'}</td>
