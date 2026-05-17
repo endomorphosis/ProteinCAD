@@ -170,7 +170,6 @@ MIGRATION_STATEMENTS = (
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
 @dataclass
 class RetrievalStore:
     config: RetrievalConfig
@@ -650,7 +649,6 @@ class RetrievalStore:
             raw_payload_dir=self.config.storage.raw_payload_dir,
             manifest_json=manifest_json,
         )
-        manifest["evidence_manifest_updated"] = True
         return manifest
 
     def upsert_cache_entry(
