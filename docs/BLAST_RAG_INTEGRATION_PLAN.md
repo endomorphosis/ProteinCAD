@@ -29,7 +29,8 @@ The recommended rollout is incremental:
 - Milestone 2 now also supports optional DuckDB-backed Parquet bundle export plus dataset manifest persistence for enriched retrieval batches.
 - Milestone 3 now exposes retrieval through REST submit/status/cache endpoints, MCP tools, and MCP resources for cached evidence bundles plus persisted dataset manifests.
 - Grounding policy decision: keep BLAST grounding opt-in for design jobs by default until dashboard controls and evidence UX are in place; use `MCP_RETRIEVAL_ENABLE_JOB_GROUNDING=true` to enable it explicitly.
-- Remaining work is focused on dashboard UX and design-job evidence wiring.
+- Milestone 4 now has an implementation slice in place: per-job grounding toggle in submission flows, retrieval status surfaced in job cards, and BLAST evidence rendering in results (top homolog table, evidence packet, manifest/resource quick actions).
+- Remaining work is focused on dashboard contract/e2e hardening and optional local BLAST+/ETL follow-up.
 
 ---
 

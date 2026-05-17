@@ -383,7 +383,9 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert fetch_response.status_code == 200
             fetched = fetch_response.json()
             assert fetched["request_id"] == request_id
-            assert fetched["evidence_packet"]["documents"][0]["source_id"] == "ABC123"
+            assert fetched["result"]["evidence_packet"]["documents"][0]["source_id"] == "ABC123"
+            assert fetched["hit_count"] == 1
+            assert fetched["evidence_count"] == 1
 
             cache_response = await client.get("/api/retrieval/cache")
             assert cache_response.status_code == 200
@@ -433,7 +435,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             get_tool_result = get_tool_response.json()["result"]
             get_tool_payload = json.loads(get_tool_result["content"][0]["text"])
             assert get_tool_payload["request_id"] == request_id
-            assert get_tool_payload["evidence_packet"]["document_count"] == 1
+            assert get_tool_payload["result"]["evidence_packet"]["document_count"] == 1
 
             resource_read_response = await client.post(
                 "/mcp",
@@ -448,7 +450,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             resource_contents = resource_read_response.json()["result"]["contents"]
             resource_payload = json.loads(resource_contents[0]["text"])
             assert resource_payload["request_id"] == request_id
-            assert resource_payload["evidence_packet"]["document_count"] == 1
+            assert resource_payload["result"]["evidence_packet"]["document_count"] == 1
 
             manifest_read_response = await client.post(
                 "/mcp",
@@ -481,3 +483,33 @@ def test_retrieval_store_skips_schema_when_startup_bootstrap_disabled(tmp_path):
     assert store.initialize_if_enabled() is None
     assert store.initialized is False
     assert Path(cfg.retrieval.storage.duckdb_path).exists() is False
+
+
+def test_job_creation_accepts_grounding_inputs(tmp_path):
+    handler, _ = _mock_blast_handler()
+    server = _configure_and_reset_server_for_retrieval(tmp_path, handler, export_parquet=False)
+
+    async def exercise_server() -> None:
+        server.jobs_db.clear()
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.post(
+                "/api/jobs",
+                json={
+                    "sequence": TEST_FASTA_QUERY,
+                    "num_designs": 1,
+                    "ground_with_blast_evidence": True,
+                    "retrieval_program": "blastp",
+                    "retrieval_database": "swissprot",
+                    "retrieval_hitlist_size": 10,
+                },
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["input"]["ground_with_blast_evidence"] is True
+            assert payload["input"]["retrieval"]["program"] == "blastp"
+            assert payload["input"]["retrieval"]["database"] == "swissprot"
+            assert payload["input"]["retrieval"]["hitlist_size"] == 10
+            assert payload["retrieval"]["requested"] is True
+
+    asyncio.run(exercise_server())

@@ -181,6 +181,143 @@ def _serialize_retrieval_result(result: Any) -> Dict[str, Any]:
     raise TypeError(f"Unsupported retrieval result payload type: {type(result).__name__}")
 
 
+def _normalize_retrieval_payload(
+    payload: Dict[str, Any],
+    *,
+    cached: Optional[bool] = None,
+    provider_override: Optional[str] = None,
+    request_id_override: Optional[str] = None,
+    cache_key_override: Optional[str] = None,
+    run_id_override: Optional[str] = None,
+    remote_request_id_override: Optional[str] = None,
+    remote_queue_hint_seconds_override: Optional[float] = None,
+    raw_payload_path_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    hits = list(payload.get("hits") or [])
+    annotations = list(payload.get("annotations") or [])
+    evidence_documents = list(payload.get("evidence_documents") or [])
+    manifests = list(payload.get("dataset_manifests") or [])
+    runs = list(payload.get("runs") or [])
+    latest_run = runs[-1] if runs else {}
+    request_id = request_id_override or payload.get("request_id")
+    provider = provider_override or payload.get("provider") or latest_run.get("provider")
+
+    top_hits: List[Dict[str, Any]] = []
+    for hit in hits[:5]:
+        top_hits.append(
+            {
+                "hit_rank": hit.get("hit_rank"),
+                "accession": hit.get("accession"),
+                "title": hit.get("title"),
+                "organism": hit.get("organism"),
+                "bit_score": hit.get("bit_score"),
+                "e_value": hit.get("e_value"),
+                "identity_fraction": hit.get("identity_fraction"),
+                "query_coverage": hit.get("query_coverage"),
+            }
+        )
+
+    manifest_refs: List[Dict[str, Any]] = []
+    for manifest in manifests:
+        manifest_id = manifest.get("manifest_id")
+        if not manifest_id:
+            continue
+        manifest_refs.append(
+            {
+                "manifest_id": manifest_id,
+                "request_id": manifest.get("request_id"),
+                "run_id": manifest.get("run_id"),
+                "provider": manifest.get("provider"),
+                "uri": f"retrieval-manifest://{manifest_id}",
+            }
+        )
+
+    provenance_sources = sorted(
+        {
+            str(source).strip()
+            for source in [
+                *[annotation.get("source_system") for annotation in annotations],
+                *[evidence.get("source_system") for evidence in evidence_documents],
+            ]
+            if source
+        }
+    )
+    transform_versions = sorted(
+        {
+            str(version).strip()
+            for version in [
+                *[annotation.get("transform_version") for annotation in annotations],
+                *[evidence.get("transform_version") for evidence in evidence_documents],
+            ]
+            if version
+        }
+    )
+    retrieved_times = sorted(
+        [
+            str(ts)
+            for ts in [*[
+                annotation.get("retrieved_at") for annotation in annotations
+            ], *[
+                evidence.get("retrieved_at") for evidence in evidence_documents
+            ]]
+            if ts
+        ]
+    )
+
+    status = payload.get("status") or "unknown"
+    effective_cached = bool(cached) if cached is not None else (status == "completed" and bool(payload.get("cache_key")))
+    return {
+        "request_id": request_id,
+        "run_id": run_id_override or latest_run.get("run_id"),
+        "cache_key": cache_key_override or payload.get("cache_key"),
+        "provider": provider,
+        "cached": effective_cached,
+        "status": status,
+        "remote_request_id": remote_request_id_override
+        if remote_request_id_override is not None
+        else latest_run.get("remote_request_id"),
+        "remote_queue_hint_seconds": remote_queue_hint_seconds_override
+        if remote_queue_hint_seconds_override is not None
+        else latest_run.get("remote_queue_hint_seconds"),
+        "raw_payload_path": raw_payload_path_override
+        if raw_payload_path_override is not None
+        else latest_run.get("raw_payload_path"),
+        "hit_count": len(hits),
+        "annotation_count": len(annotations),
+        "evidence_count": len(evidence_documents),
+        "top_hits": top_hits,
+        "evidence_summary": {
+            "document_count": len(evidence_documents),
+            "packet": payload.get("evidence_packet") or {},
+        },
+        "manifest_refs": manifest_refs,
+        "provenance": {
+            "sources": provenance_sources,
+            "transform_versions": transform_versions,
+            "latest_retrieved_at": retrieved_times[-1] if retrieved_times else None,
+        },
+        "result": payload,
+    }
+
+
+def _normalize_retrieval_result(result: Any) -> Dict[str, Any]:
+    serialized = _serialize_retrieval_result(result)
+    if "result" in serialized and isinstance(serialized.get("result"), dict):
+        nested = dict(serialized.get("result") or {})
+        return _normalize_retrieval_payload(
+            nested,
+            cached=bool(serialized.get("cached")),
+            provider_override=serialized.get("provider"),
+            request_id_override=serialized.get("request_id"),
+            cache_key_override=serialized.get("cache_key"),
+            run_id_override=serialized.get("run_id"),
+            remote_request_id_override=serialized.get("remote_request_id"),
+            remote_queue_hint_seconds_override=serialized.get("remote_queue_hint_seconds"),
+            raw_payload_path_override=serialized.get("raw_payload_path"),
+        )
+    return _normalize_retrieval_payload(serialized)
+
+
 def _retrieval_mcp_enabled() -> bool:
     cfg = _retrieval_runtime_config()
     return bool(cfg.feature_flags.enabled and cfg.feature_flags.expose_mcp)
@@ -373,6 +510,13 @@ class ProteinSequenceInput(BaseModel):
     sequence: str = Field(..., description="Target protein amino acid sequence")
     job_name: Optional[str] = Field(None, description="Optional name for the job")
     num_designs: int = Field(5, description="Number of binder designs to generate")
+    ground_with_blast_evidence: bool = Field(
+        False,
+        description="When true, opt-in to BLAST retrieval grounding for this design job",
+    )
+    retrieval_program: Optional[str] = Field(None, description="Optional BLAST program override for this job")
+    retrieval_database: Optional[str] = Field(None, description="Optional BLAST database override for this job")
+    retrieval_hitlist_size: Optional[int] = Field(None, description="Optional BLAST hitlist size override for this job")
 
 
 class RetrievalRequestInput(BaseModel):
@@ -424,10 +568,12 @@ class JobStatus(BaseModel):
     created_at: str
     updated_at: str
     job_name: Optional[str] = None
+    input: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = None
     progress_pct: Optional[float] = None
     progress_message: Optional[str] = None
     progress: Dict[str, Any]
+    retrieval: Optional[Dict[str, Any]] = None
     results: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -836,10 +982,11 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     database=arguments.get("database"),
                     hitlist_size=arguments.get("hitlist_size"),
                 )
+                normalized = _normalize_retrieval_result(result)
                 return _jsonrpc_result(
                     msg_id,
                     {
-                        "content": [{"type": "text", "text": json.dumps(_serialize_retrieval_result(result), indent=2, default=str)}],
+                        "content": [{"type": "text", "text": json.dumps(normalized, indent=2, default=str)}],
                         "isError": False,
                     },
                 )
@@ -855,9 +1002,10 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                 result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
                 if not result:
                     return _jsonrpc_error(msg_id, -32000, "BLAST retrieval request not found")
+                normalized = _normalize_retrieval_payload(result, request_id_override=request_id)
                 return _jsonrpc_result(
                     msg_id,
-                    {"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}], "isError": False},
+                    {"content": [{"type": "text", "text": json.dumps(normalized, indent=2, default=str)}], "isError": False},
                 )
 
             if name == "design_protein_binder":
@@ -869,12 +1017,37 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     "created_at": datetime.now().isoformat(),
                     "updated_at": datetime.now().isoformat(),
                     "job_name": input_data.job_name,
-                    "input": {"sequence": input_data.sequence, "num_designs": input_data.num_designs},
+                    "input": {
+                        "sequence": input_data.sequence,
+                        "num_designs": input_data.num_designs,
+                        "ground_with_blast_evidence": bool(input_data.ground_with_blast_evidence),
+                        "retrieval": {
+                            "program": input_data.retrieval_program,
+                            "database": input_data.retrieval_database,
+                            "hitlist_size": input_data.retrieval_hitlist_size,
+                        },
+                    },
                     "progress": {
                         "alphafold": "pending",
                         "rfdiffusion": "pending",
                         "proteinmpnn": "pending",
                         "alphafold_multimer": "pending",
+                    },
+                    "retrieval": {
+                        "requested": bool(input_data.ground_with_blast_evidence),
+                        "enabled": False,
+                        "status": "not_requested" if not input_data.ground_with_blast_evidence else "queued",
+                        "message": "BLAST grounding not requested"
+                        if not input_data.ground_with_blast_evidence
+                        else "BLAST grounding queued",
+                        "started_at": None,
+                        "completed_at": None,
+                        "request_id": None,
+                        "cached": None,
+                        "hit_count": 0,
+                        "evidence_count": 0,
+                        "error": None,
+                        "result": None,
                     },
                     "results": None,
                     "error": None,
@@ -1110,12 +1283,13 @@ async def get_resource(resource_id: str) -> Dict[str, Any]:
         result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, identifier)
         if not result:
             raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
+        normalized = _normalize_retrieval_payload(result, request_id_override=identifier)
         return {
             "contents": [
                 {
                     "uri": f"retrieval://{identifier}",
                     "mimeType": "application/json",
-                    "text": json.dumps(result, indent=2, default=str),
+                    "text": json.dumps(normalized, indent=2, default=str),
                 }
             ]
         }
@@ -1164,7 +1338,7 @@ async def create_retrieval_request(input_data: RetrievalRequestInput) -> Dict[st
         database=input_data.database,
         hitlist_size=input_data.hitlist_size,
     )
-    return _serialize_retrieval_result(result)
+    return _normalize_retrieval_result(result)
 
 
 @app.get("/api/retrieval/requests/{request_id}")
@@ -1174,7 +1348,7 @@ async def get_retrieval_request(request_id: str) -> Dict[str, Any]:
     result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
     if not result:
         raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
-    return result
+    return _normalize_retrieval_payload(result, request_id_override=request_id)
 
 
 @app.get("/api/retrieval/cache")
@@ -1205,13 +1379,35 @@ async def create_job(
         "progress_message": "Created",
         "input": {
             "sequence": input_data.sequence,
-            "num_designs": input_data.num_designs
+            "num_designs": input_data.num_designs,
+            "ground_with_blast_evidence": bool(input_data.ground_with_blast_evidence),
+            "retrieval": {
+                "program": input_data.retrieval_program,
+                "database": input_data.retrieval_database,
+                "hitlist_size": input_data.retrieval_hitlist_size,
+            },
         },
         "progress": {
             "alphafold": "pending",
             "rfdiffusion": "pending",
             "proteinmpnn": "pending",
             "alphafold_multimer": "pending"
+        },
+        "retrieval": {
+            "requested": bool(input_data.ground_with_blast_evidence),
+            "enabled": False,
+            "status": "not_requested" if not input_data.ground_with_blast_evidence else "queued",
+            "message": "BLAST grounding not requested"
+            if not input_data.ground_with_blast_evidence
+            else "BLAST grounding queued",
+            "started_at": None,
+            "completed_at": None,
+            "request_id": None,
+            "cached": None,
+            "hit_count": 0,
+            "evidence_count": 0,
+            "error": None,
+            "result": None,
         },
         "results": None,
         "error": None,
@@ -1439,6 +1635,86 @@ async def process_job(job_id: str):
         
         sequence = job["input"]["sequence"]
         num_designs = job["input"]["num_designs"]
+        retrieval_state = job.get("retrieval")
+        if not isinstance(retrieval_state, dict):
+            retrieval_state = {
+                "requested": False,
+                "enabled": False,
+                "status": "not_requested",
+                "message": "BLAST grounding not requested",
+                "started_at": None,
+                "completed_at": None,
+                "request_id": None,
+                "cached": None,
+                "hit_count": 0,
+                "evidence_count": 0,
+                "error": None,
+                "result": None,
+            }
+            job["retrieval"] = retrieval_state
+        retrieval_cfg = _retrieval_runtime_config()
+        retrieval_requested = bool(job.get("input", {}).get("ground_with_blast_evidence"))
+        retrieval_state["requested"] = retrieval_requested
+        retrieval_state["enabled"] = False
+        retrieval_state["status"] = "not_requested"
+        retrieval_state["message"] = "BLAST grounding not requested"
+        retrieval_state["error"] = None
+        retrieval_state["result"] = None
+        retrieval_state["request_id"] = None
+        retrieval_state["cached"] = None
+        retrieval_state["hit_count"] = 0
+        retrieval_state["evidence_count"] = 0
+
+        if retrieval_requested:
+            if not retrieval_cfg.feature_flags.enabled:
+                retrieval_state["status"] = "disabled"
+                retrieval_state["message"] = "BLAST retrieval is disabled in runtime config"
+            elif not retrieval_cfg.feature_flags.allow_job_grounding:
+                retrieval_state["status"] = "disabled"
+                retrieval_state["message"] = "BLAST job grounding is opt-in and currently disabled"
+            else:
+                retrieval_state["enabled"] = True
+                retrieval_state["status"] = "running"
+                retrieval_state["message"] = "Running BLAST retrieval grounding"
+                retrieval_state["started_at"] = datetime.now().isoformat()
+                _job_set_progress(job, stage="retrieval", pct=2, message="Running BLAST retrieval grounding")
+                try:
+                    asyncio.create_task(broadcast_event({"type": "job.updated", "job": _public_job_dict(job)}))
+                except Exception:
+                    pass
+                retrieval_input = job.get("input", {}).get("retrieval", {})
+                try:
+                    retrieval_result = await app.state.retrieval_service.retrieve(
+                        sequence,
+                        program=retrieval_input.get("program"),
+                        database=retrieval_input.get("database"),
+                        hitlist_size=retrieval_input.get("hitlist_size"),
+                    )
+                    normalized_retrieval = _normalize_retrieval_result(retrieval_result)
+                    retrieval_state["status"] = "completed" if not normalized_retrieval.get("cached") else "cached"
+                    retrieval_state["message"] = (
+                        "BLAST retrieval reused cached evidence"
+                        if normalized_retrieval.get("cached")
+                        else "BLAST retrieval completed"
+                    )
+                    retrieval_state["completed_at"] = datetime.now().isoformat()
+                    retrieval_state["request_id"] = normalized_retrieval.get("request_id")
+                    retrieval_state["cached"] = normalized_retrieval.get("cached")
+                    retrieval_state["hit_count"] = normalized_retrieval.get("hit_count", 0)
+                    retrieval_state["evidence_count"] = normalized_retrieval.get("evidence_count", 0)
+                    retrieval_state["result"] = normalized_retrieval
+                    _job_set_progress(job, stage="retrieval", pct=8, message=retrieval_state["message"])
+                except Exception as retrieval_exc:
+                    short = _summarize_error(retrieval_exc)
+                    retrieval_state["status"] = "failed"
+                    retrieval_state["message"] = f"BLAST retrieval failed: {short}"
+                    retrieval_state["error"] = short
+                    retrieval_state["completed_at"] = datetime.now().isoformat()
+                    _job_set_progress(job, stage="retrieval", pct=8, message=retrieval_state["message"])
+                try:
+                    asyncio.create_task(broadcast_event({"type": "job.updated", "job": _public_job_dict(job)}))
+                except Exception:
+                    pass
 
         # Optional: store richer (slower) residency sampling in job metrics snapshots.
         include_residency = (os.getenv("MCP_JOB_INCLUDE_RESIDENCY") or "0").strip() in ("1", "true", "yes")
@@ -1685,7 +1961,8 @@ async def process_job(job_id: str):
                     "complex_structure": multimer_results[i] if i < len(multimer_results) else {}
                 }
                 for i in range(num_designs)
-            ]
+            ],
+            "retrieval": job.get("retrieval", {}).get("result"),
         }
         
         job["status"] = "completed"

@@ -43,8 +43,12 @@ class MCPClient {
     return getJson('/api/mcp/resources')
   }
 
+  async readResource(uri: string) {
+    return sendJson('/api/mcp/resources/read', 'POST', { uri })
+  }
+
   async getResource(jobId: string) {
-    return sendJson('/api/mcp/resources/read', 'POST', { uri: `job://${jobId}` })
+    return this.readResource(`job://${jobId}`)
   }
 
   // Job management methods (implemented via MCP tools)

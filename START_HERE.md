@@ -84,6 +84,7 @@ In the Dashboard header, click **Settings** to choose how model calls are routed
 - **NIM** — NVIDIA NIM services (AMD64, requires NGC API key)
 - **External** — any compatible REST services you run elsewhere
 - **Embedded** — runs inside the MCP server container (ProteinMPNN supported when weights are present)
+- **BLAST Retrieval** — configure DuckDB-backed BLAST defaults, API exposure, and opt-in job grounding controls
 
 Use **fallback** mode to try providers in priority order. Settings persist across restarts when using the provided Docker compose stacks.
 

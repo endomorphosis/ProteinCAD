@@ -12,6 +12,7 @@ test.describe('Jobs flow', () => {
 
   test('create a job and see it in the list + results placeholder', async ({ page }) => {
     const jobs: any[] = []
+    let createdPayload: any = null
 
     page.on('dialog', async (dialog) => {
       await dialog.accept()
@@ -30,6 +31,7 @@ test.describe('Jobs flow', () => {
 
       if (method === 'POST') {
         const body = route.request().postDataJSON() as any
+        createdPayload = body
         const job = {
           job_id: 'job_20250101_000000_0',
           status: 'created',
@@ -66,8 +68,16 @@ test.describe('Jobs flow', () => {
     await page.getByLabel(/Target Protein Sequence/i).fill('MKTAYIAKQRQISFVKSHFSRQ')
     await page.getByLabel(/Job Name/i).fill('e2e job')
     await page.getByLabel(/Number of Designs/i).fill('3')
+    await page.getByLabel('Ground with BLAST evidence (opt-in)').click()
+    await page.getByLabel('Program').fill('blastp')
+    await page.getByLabel('Database').fill('swissprot')
+    await page.getByLabel('Hitlist size').fill('10')
 
     await page.getByRole('button', { name: /Start Design Job/i }).click()
+    expect(createdPayload?.ground_with_blast_evidence).toBe(true)
+    expect(createdPayload?.retrieval_program).toBe('blastp')
+    expect(createdPayload?.retrieval_database).toBe('swissprot')
+    expect(createdPayload?.retrieval_hitlist_size).toBe(10)
 
     const jobCard = page.getByTestId('job-card-job_20250101_000000_0')
     await expect(jobCard).toBeVisible()
