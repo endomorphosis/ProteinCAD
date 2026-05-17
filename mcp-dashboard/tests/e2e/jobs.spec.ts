@@ -88,4 +88,53 @@ test.describe('Jobs flow', () => {
     await jobCard.getByRole('button', { name: 'Delete job e2e job' }).click()
     await expect(jobCard).toBeHidden()
   })
+
+  test('shows BLAST retrieval badge on grounded jobs', async ({ page }) => {
+    const jobs = [
+      {
+        job_id: 'job_grounded_0',
+        status: 'running',
+        created_at: isoNow(),
+        updated_at: isoNow(),
+        job_name: 'grounded job',
+        input: {
+          sequence: 'MKTAYIAKQRQISFVKSHFSRQ',
+          num_designs: 3,
+          ground_with_blast_evidence: true,
+        },
+        retrieval: {
+          requested: true,
+          status: 'cached',
+          cached: true,
+          hit_count: 2,
+        },
+        progress: {
+          alphafold: 'running',
+          rfdiffusion: 'pending',
+          proteinmpnn: 'pending',
+          alphafold_multimer: 'pending',
+        },
+        results: null,
+        error: null,
+      },
+    ]
+
+    await page.route('**/api/mcp/services/status', async (route) => {
+      await jsonRoute(route, { alphafold: { status: 'ready', url: 'x' } })
+    })
+    await page.route('**/api/mcp/jobs', async (route) => {
+      if (route.request().method() === 'GET') {
+        await jsonRoute(route, jobs)
+        return
+      }
+      await route.fallback()
+    })
+
+    await page.goto('/')
+    const card = page.getByTestId('job-card-job_grounded_0')
+    await expect(card).toBeVisible()
+    await expect(card.getByText('BLAST cached')).toBeVisible()
+    await expect(card.getByText('2 hits')).toBeVisible()
+    await expect(card.getByText('cache hit')).toBeVisible()
+  })
 })
