@@ -299,6 +299,12 @@ def test_remote_retrieval_service_exports_parquet_without_evidence_documents(tmp
     assert manifest["manifest"]["evidence_count"] == 0
     assert Path(manifest["manifest"]["parquet_files"]["hits"]).is_file() is True
     assert Path(manifest["manifest"]["parquet_files"]["evidence_documents"]).is_file() is True
+    with duckdb.connect() as conn:
+        evidence_count = conn.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)",
+            [manifest["manifest"]["parquet_files"]["evidence_documents"]],
+        ).fetchone()[0]
+    assert evidence_count == 0
 
 
 def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):

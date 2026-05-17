@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -141,7 +142,7 @@ SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS dataset_manifests (
         manifest_id VARCHAR PRIMARY KEY,
-        request_id VARCHAR NOT NULL,
+        request_id VARCHAR,
         run_id VARCHAR,
         provider VARCHAR NOT NULL,
         source_system VARCHAR NOT NULL,
@@ -518,115 +519,125 @@ class RetrievalStore:
         transform_version: str,
     ) -> Dict[str, Any]:
         manifest_id = f"{request_id}_parquet"
-        bundle_dir = Path(self.config.storage.parquet_export_dir).expanduser() / request_id
+        bundle_root = Path(self.config.storage.parquet_export_dir).expanduser()
+        bundle_dir = bundle_root / request_id
+        temp_bundle_dir = bundle_root / f".{request_id}.tmp"
         manifest_path = Path(self.config.storage.manifest_dir).expanduser() / f"{manifest_id}.json"
+        temp_manifest_path = manifest_path.with_suffix(".tmp.json")
         self._ensure_parent_dirs()
-        bundle_dir.mkdir(parents=True, exist_ok=True)
-        for parquet_file in bundle_dir.glob("*.parquet"):
-            parquet_file.unlink()
+        if temp_bundle_dir.exists():
+            shutil.rmtree(temp_bundle_dir)
+        temp_bundle_dir.mkdir(parents=True, exist_ok=True)
 
         parquet_files = {
-            "request": str(bundle_dir / "request.parquet"),
-            "runs": str(bundle_dir / "runs.parquet"),
-            "hits": str(bundle_dir / "hits.parquet"),
-            "alignments": str(bundle_dir / "alignments.parquet"),
-            "annotations": str(bundle_dir / "annotations.parquet"),
-            "evidence_documents": str(bundle_dir / "evidence_documents.parquet"),
+            "request": str(temp_bundle_dir / "request.parquet"),
+            "runs": str(temp_bundle_dir / "runs.parquet"),
+            "hits": str(temp_bundle_dir / "hits.parquet"),
+            "alignments": str(temp_bundle_dir / "alignments.parquet"),
+            "annotations": str(temp_bundle_dir / "annotations.parquet"),
+            "evidence_documents": str(temp_bundle_dir / "evidence_documents.parquet"),
         }
 
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    "UPDATE evidence_documents SET manifest_id = ? WHERE request_id = ?",
-                    [manifest_id, request_id],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT request_id, cache_key, provider, query_sequence, normalized_sequence,
-                               request_params_json, requested_at, status, error_text
-                        FROM retrieval_requests
-                        WHERE request_id = $1
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["request"]],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
-                               submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
-                        FROM retrieval_runs
-                        WHERE request_id = $1
-                        ORDER BY submitted_at ASC
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["runs"]],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT h.run_id, h.hit_rank, h.accession, h.title, h.organism, h.e_value, h.bit_score,
-                               h.identity_fraction, h.positives_fraction, h.query_coverage, h.subject_coverage,
-                               h.alignment_length, h.subject_length, h.raw_hit_json
-                        FROM blast_hits h
-                        INNER JOIN retrieval_runs r ON r.run_id = h.run_id
-                        WHERE r.request_id = $1
-                        ORDER BY h.run_id ASC, h.hit_rank ASC
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["hits"]],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT a.run_id, a.hit_rank, a.hsp_index, a.query_from_pos, a.query_to_pos,
-                               a.subject_from_pos, a.subject_to_pos, a.alignment_length, a.identity_count,
-                               a.positive_count, a.gap_count, a.query_sequence, a.subject_sequence, a.midline,
-                               a.raw_alignment_json
-                        FROM blast_alignments a
-                        INNER JOIN retrieval_runs r ON r.run_id = a.run_id
-                        WHERE r.request_id = $1
-                        ORDER BY a.run_id ASC, a.hit_rank ASC, a.hsp_index ASC
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["alignments"]],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
-                               organism, annotation_json, retrieved_at, transform_version
-                        FROM protein_annotations
-                        WHERE request_id = $1
-                        ORDER BY hit_rank ASC
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["annotations"]],
-                )
-                conn.execute(
-                    """
-                    COPY (
-                        SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
-                               content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
-                        FROM evidence_documents
-                        WHERE request_id = $1
-                        ORDER BY hit_rank ASC NULLS LAST, created_at ASC NULLS LAST
-                    ) TO $2 (FORMAT PARQUET)
-                    """,
-                    [request_id, parquet_files["evidence_documents"]],
-                )
-                count_row = conn.execute(
-                    """
-                    SELECT
-                        (SELECT COUNT(*) FROM retrieval_runs WHERE request_id = ?) AS run_count,
-                        (SELECT COUNT(*) FROM blast_hits h INNER JOIN retrieval_runs r ON r.run_id = h.run_id WHERE r.request_id = ?) AS hit_count,
-                        (SELECT COUNT(*) FROM blast_alignments a INNER JOIN retrieval_runs r ON r.run_id = a.run_id WHERE r.request_id = ?) AS alignment_count,
-                        (SELECT COUNT(*) FROM protein_annotations WHERE request_id = ?) AS annotation_count,
-                        (SELECT COUNT(*) FROM evidence_documents WHERE request_id = ?) AS evidence_count
-                    """,
-                    [request_id, request_id, request_id, request_id, request_id],
-                ).fetchone()
+        try:
+            with self._lock:
+                with self._connect() as conn:
+                    conn.execute(
+                        "UPDATE evidence_documents SET manifest_id = ? WHERE request_id = ?",
+                        [manifest_id, request_id],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT request_id, cache_key, provider, query_sequence, normalized_sequence,
+                                   request_params_json, requested_at, status, error_text
+                            FROM retrieval_requests
+                            WHERE request_id = $1
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["request"]],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
+                                   submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
+                            FROM retrieval_runs
+                            WHERE request_id = $1
+                            ORDER BY submitted_at ASC
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["runs"]],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT h.run_id, h.hit_rank, h.accession, h.title, h.organism, h.e_value, h.bit_score,
+                                   h.identity_fraction, h.positives_fraction, h.query_coverage, h.subject_coverage,
+                                   h.alignment_length, h.subject_length, h.raw_hit_json
+                            FROM blast_hits h
+                            INNER JOIN retrieval_runs r ON r.run_id = h.run_id
+                            WHERE r.request_id = $1
+                            ORDER BY h.run_id ASC, h.hit_rank ASC
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["hits"]],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT a.run_id, a.hit_rank, a.hsp_index, a.query_from_pos, a.query_to_pos,
+                                   a.subject_from_pos, a.subject_to_pos, a.alignment_length, a.identity_count,
+                                   a.positive_count, a.gap_count, a.query_sequence, a.subject_sequence, a.midline,
+                                   a.raw_alignment_json
+                            FROM blast_alignments a
+                            INNER JOIN retrieval_runs r ON r.run_id = a.run_id
+                            WHERE r.request_id = $1
+                            ORDER BY a.run_id ASC, a.hit_rank ASC, a.hsp_index ASC
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["alignments"]],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                                   organism, annotation_json, retrieved_at, transform_version
+                            FROM protein_annotations
+                            WHERE request_id = $1
+                            ORDER BY hit_rank ASC
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["annotations"]],
+                    )
+                    conn.execute(
+                        """
+                        COPY (
+                            SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                                   content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
+                            FROM evidence_documents
+                            WHERE request_id = $1
+                            ORDER BY hit_rank ASC NULLS LAST, created_at ASC NULLS LAST
+                        ) TO $2 (FORMAT PARQUET)
+                        """,
+                        [request_id, parquet_files["evidence_documents"]],
+                    )
+                    count_row = conn.execute(
+                        """
+                        SELECT
+                            (SELECT COUNT(*) FROM retrieval_runs WHERE request_id = ?) AS run_count,
+                            (SELECT COUNT(*) FROM blast_hits h INNER JOIN retrieval_runs r ON r.run_id = h.run_id WHERE r.request_id = ?) AS hit_count,
+                            (SELECT COUNT(*) FROM blast_alignments a INNER JOIN retrieval_runs r ON r.run_id = a.run_id WHERE r.request_id = ?) AS alignment_count,
+                            (SELECT COUNT(*) FROM protein_annotations WHERE request_id = ?) AS annotation_count,
+                            (SELECT COUNT(*) FROM evidence_documents WHERE request_id = ?) AS evidence_count
+                        """,
+                        [request_id, request_id, request_id, request_id, request_id],
+                    ).fetchone()
+        except Exception:
+            if temp_bundle_dir.exists():
+                shutil.rmtree(temp_bundle_dir)
+            if temp_manifest_path.exists():
+                temp_manifest_path.unlink()
+            raise
 
         manifest = {
             "manifest_id": manifest_id,
@@ -638,7 +649,10 @@ class RetrievalStore:
             "parquet_path": str(bundle_dir),
             "raw_payload_dir": self.config.storage.raw_payload_dir,
             "manifest_path": str(manifest_path),
-            "parquet_files": parquet_files,
+            "parquet_files": {
+                name: str(bundle_dir / Path(path).name)
+                for name, path in parquet_files.items()
+            },
             "run_count": int(count_row[0] or 0),
             "hit_count": int(count_row[1] or 0),
             "alignment_count": int(count_row[2] or 0),
@@ -647,7 +661,11 @@ class RetrievalStore:
             "created_at": _utcnow().isoformat(),
         }
         manifest_json = json.dumps(manifest, sort_keys=True)
-        manifest_path.write_text(manifest_json, encoding="utf-8")
+        temp_manifest_path.write_text(manifest_json, encoding="utf-8")
+        if bundle_dir.exists():
+            shutil.rmtree(bundle_dir)
+        temp_bundle_dir.replace(bundle_dir)
+        temp_manifest_path.replace(manifest_path)
         self.upsert_dataset_manifest(
             manifest_id=manifest_id,
             request_id=request_id,
