@@ -204,18 +204,20 @@ test.describe('Settings + utility buttons', () => {
   })
 
   test('BLAST retrieval settings render and are included in saved config', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 1800 })
     await page.goto('/')
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
 
     await expect(page.getByRole('heading', { name: 'BLAST Retrieval' })).toBeVisible()
     const groundingToggle = page.getByLabel('allow job grounding (opt-in)')
     await expect(groundingToggle).toBeVisible()
-    await groundingToggle.evaluate((el: HTMLInputElement) => el.click())
+    await groundingToggle.click()
 
     const programInput = page.getByLabel('Program')
     await programInput.scrollIntoViewIfNeeded()
     await programInput.fill('blastx')
-    await page.getByRole('button', { name: 'Save' }).evaluate((el: HTMLButtonElement) => el.click())
+    // Modal footer can be clipped in this viewport/layout; dispatch click directly.
+    await page.getByRole('button', { name: 'Save' }).dispatchEvent('click')
 
     expect(putConfigPayloads.length).toBeGreaterThan(0)
     const latest = putConfigPayloads[putConfigPayloads.length - 1]

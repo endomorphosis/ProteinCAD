@@ -395,11 +395,13 @@ export default function BackendSettings() {
       request_timeout_seconds: 1,
     }
 
-    let nextValue: string | number = typeof value === 'string' ? value : Number(value)
+    let nextValue: string | number
     if (key in numericFieldMins) {
       const parsed = Number(value)
       const min = numericFieldMins[key as keyof typeof numericFieldMins] ?? 1
       nextValue = Number.isFinite(parsed) ? Math.max(min, parsed) : min
+    } else {
+      nextValue = String(value)
     }
 
     setConfig({
