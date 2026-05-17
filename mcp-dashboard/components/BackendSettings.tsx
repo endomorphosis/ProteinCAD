@@ -375,17 +375,33 @@ export default function BackendSettings() {
       | 'poll_interval_seconds'
       | 'max_poll_attempts'
       | 'request_timeout_seconds',
-    value: string
+    value: string | number
   ) => {
     if (!config) return
-    const numericFields = new Set([
-      'default_hitlist_size',
-      'max_hitlist_size',
-      'poll_interval_seconds',
-      'max_poll_attempts',
-      'request_timeout_seconds',
-    ])
-    const nextValue = numericFields.has(key) ? Number(value) || 0 : value
+    const numericFieldMins: Partial<
+      Record<
+        | 'default_hitlist_size'
+        | 'max_hitlist_size'
+        | 'poll_interval_seconds'
+        | 'max_poll_attempts'
+        | 'request_timeout_seconds',
+        number
+      >
+    > = {
+      default_hitlist_size: 1,
+      max_hitlist_size: 1,
+      poll_interval_seconds: 1,
+      max_poll_attempts: 1,
+      request_timeout_seconds: 1,
+    }
+
+    let nextValue: string | number = typeof value === 'string' ? value : Number(value)
+    if (key in numericFieldMins) {
+      const parsed = Number(value)
+      const min = numericFieldMins[key as keyof typeof numericFieldMins] ?? 1
+      nextValue = Number.isFinite(parsed) ? Math.max(min, parsed) : min
+    }
+
     setConfig({
       ...config,
       retrieval: {
