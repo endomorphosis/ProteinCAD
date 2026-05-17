@@ -29,6 +29,7 @@ def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
 
     assert retrieval.provider == "ncbi_blast_remote"
     assert retrieval.feature_flags.enabled is False
+    assert retrieval.feature_flags.export_parquet is False
     assert retrieval.blast.default_program == "blastp"
     assert retrieval.blast.default_database == "swissprot"
     assert retrieval.blast.default_hitlist_size == 25
@@ -44,6 +45,7 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_RETRIEVAL_DATABASE", "nr")
     monkeypatch.setenv("MCP_RETRIEVAL_HITLIST_SIZE", "40")
     monkeypatch.setenv("MCP_RETRIEVAL_MAX_POLL_ATTEMPTS", "12")
+    monkeypatch.setenv("MCP_RETRIEVAL_EXPORT_PARQUET", "true")
 
     cfg = MCPServerConfig()
     manager = RuntimeConfigManager(path=str(tmp_path / "config.json"))
@@ -52,6 +54,7 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
 
     assert cfg.retrieval.provider == "local_blast"
     assert retrieval.feature_flags.enabled is True
+    assert retrieval.feature_flags.export_parquet is True
     assert retrieval.provider == "local_blast"
     assert retrieval.blast.default_program == "blastx"
     assert retrieval.blast.default_database == "nr"
@@ -115,6 +118,7 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     cfg = MCPServerConfig()
     cfg.retrieval.feature_flags.enabled = True
     cfg.retrieval.feature_flags.evidence_enrichment = True
+    cfg.retrieval.feature_flags.export_parquet = True
     cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
     cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
     cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
@@ -194,8 +198,18 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     assert first.result["annotations"][0]["annotation"]["bit_score"] == 55.0
     assert first.result["evidence_documents"][0]["title"] == "Example protein"
     assert "bit score 55.0" in first.result["evidence_documents"][0]["content_text"]
+    assert first.result["evidence_documents"][0]["manifest_id"] == f"{first.request_id}_parquet"
     assert first.result["evidence_packet"]["document_count"] == 1
     assert first.result["evidence_packet"]["documents"][0]["source_id"] == "ABC123"
+    assert len(first.result["dataset_manifests"]) == 1
+    manifest = first.result["dataset_manifests"][0]
+    assert manifest["manifest_id"] == f"{first.request_id}_parquet"
+    assert manifest["provider"] == "ncbi_blast_remote"
+    assert Path(manifest["parquet_path"]).is_dir() is True
+    assert Path(manifest["manifest"]["manifest_path"]).is_file() is True
+    assert Path(manifest["manifest"]["parquet_files"]["hits"]).is_file() is True
+    assert Path(manifest["manifest"]["parquet_files"]["evidence_documents"]).is_file() is True
+    assert manifest["manifest"]["evidence_count"] == 1
     assert len(first.result["alignments"]) == 1
     assert Path(first.raw_payload_path or "").exists() is True
 
@@ -204,6 +218,7 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     assert second.annotation_count == 1
     assert second.evidence_count == 1
     assert second.result["evidence_packet"]["document_count"] == 1
+    assert second.result["dataset_manifests"][0]["manifest_id"] == f"{first.request_id}_parquet"
     assert request_counts == {"submit": 1, "search_info": 2, "result": 1}
 
 

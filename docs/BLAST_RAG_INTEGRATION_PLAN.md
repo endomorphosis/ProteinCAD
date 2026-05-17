@@ -26,7 +26,8 @@ The recommended rollout is incremental:
 - Remote retrieval currently covers NCBI BLAST `CMD=Put`, `CMD=Get` polling, DuckDB persistence, raw payload retention, alignment normalization, cache reuse, and mocked test coverage.
 - Milestone 2 now has a first enrichment slice: normalized annotation records, accession/title/organism enrichment, evidence documents with provenance fields, and short evidence packets are produced from cached BLAST hits.
 - The `ipfs_datasets_py` boundary is now defined: BLAST query-time retrieval, caching, normalization, and evidence packets stay in the MCP server; only non-BLAST scraping, heterogeneous ETL, Parquet packaging, and optional IPFS publication should cross into `ipfs_datasets_py`.
-- Remaining work is focused on optional Parquet export plus exposing retrieval evidence through MCP/REST and dashboard UX.
+- Milestone 2 now also supports optional DuckDB-backed Parquet bundle export plus dataset manifest persistence for enriched retrieval batches.
+- Remaining work is focused on exposing retrieval evidence through MCP/REST and dashboard UX.
 
 ---
 

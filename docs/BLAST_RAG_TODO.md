@@ -29,19 +29,19 @@ If the snapshot is stale, update it before starting implementation work.
 - **Status**: Milestone 2 in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
 - **Current milestone**: Milestone 2 — evidence enrichment
-- **Next in-progress task**: add optional Parquet export for enriched evidence batches
+- **Next in-progress task**: expose retrieval evidence through MCP/REST endpoints
 - **Primary edit targets**:
-  - `mcp-server/retrieval_store.py`
+  - `mcp-server/server.py`
   - `mcp-server/retrieval_service.py`
-  - `mcp-server/runtime_config.py`
-  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
+  - `mcp-server/retrieval_store.py`
+  - `tests/test_blast_retrieval_config.py`
 - **Open decisions blocking deeper implementation**:
   - whether BLAST grounding is opt-in or enabled by default for design jobs
 - **Recommended first implementation slice**:
-  1. add optional Parquet export for enriched evidence batches
-  2. expose retrieval evidence through MCP/REST endpoints
-  3. add endpoint/tool tests around evidence packets
-  4. decide whether BLAST grounding stays opt-in when MCP endpoints ship
+  1. expose retrieval evidence through MCP/REST endpoints
+  2. add endpoint/tool tests around evidence packets
+  3. decide whether BLAST grounding stays opt-in when MCP endpoints ship
+  4. add MCP resources for cached evidence bundles
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -109,7 +109,7 @@ Goal: turn BLAST hits into promptable evidence with provenance.
 - [x] Generate short evidence packets for MCP consumers
 - [x] Add provenance columns for source system, source id, retrieval time, and transform version
 - [x] Identify where `ipfs_datasets_py` is truly needed for non-BLAST source ingestion
-- [ ] Add optional Parquet export for enriched evidence batches
+- [x] Add optional Parquet export for enriched evidence batches
 
 ### Exit criteria
 
@@ -176,12 +176,11 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Add optional Parquet export for enriched evidence batches
-2. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
-3. [ ] Add tests for MCP and REST retrieval flows using mocked BLAST responses
-4. [ ] Add dashboard retrieval settings/evidence rendering
-5. [ ] Add local BLAST+ provider support after the remote evidence path is stable
-6. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
+1. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
+2. [ ] Add tests for MCP and REST retrieval flows using mocked BLAST responses
+3. [ ] Add dashboard retrieval settings/evidence rendering
+4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
+5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
 
 ---
 
@@ -189,15 +188,15 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: document the `ipfs_datasets_py` boundary — keep live BLAST retrieval in ProteinCAD, reserve `ipfs_datasets_py` for non-BLAST scraping/ETL, Parquet packaging, and optional IPFS publication
-- **Next recommended task**: add optional Parquet export for enriched evidence batches
+- **Last completed task**: add optional Parquet export for enriched retrieval batches — gated by `MCP_RETRIEVAL_EXPORT_PARQUET`, with per-request Parquet bundles plus persisted dataset manifests linked back to evidence documents
+- **Next recommended task**: expose retrieval evidence through MCP/REST endpoints
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
+  - `mcp-server/server.py`
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_service.py`
-  - `mcp-server/runtime_config.py`
-  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
   - `tests/test_blast_retrieval_config.py`
+  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - decide whether BLAST grounding stays opt-in once MCP endpoints exist
 - **Validation to run next time**:

@@ -165,6 +165,12 @@ MIGRATION_STATEMENTS = (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _sql_quote(value: str) -> str:
+    return value.replace("'", "''")
+
+
 @dataclass
 class RetrievalStore:
     config: RetrievalConfig
@@ -455,6 +461,187 @@ class RetrievalStore:
                         ],
                     )
 
+    def upsert_dataset_manifest(
+        self,
+        *,
+        manifest_id: str,
+        provider: str,
+        source_system: str,
+        transform_version: str,
+        parquet_path: str,
+        raw_payload_dir: str,
+        manifest_json: str,
+    ) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO dataset_manifests (
+                        manifest_id, provider, source_system, transform_version, parquet_path,
+                        raw_payload_dir, manifest_json, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (manifest_id) DO UPDATE SET
+                        provider = excluded.provider,
+                        source_system = excluded.source_system,
+                        transform_version = excluded.transform_version,
+                        parquet_path = excluded.parquet_path,
+                        raw_payload_dir = excluded.raw_payload_dir,
+                        manifest_json = excluded.manifest_json,
+                        created_at = excluded.created_at
+                    """,
+                    [
+                        manifest_id,
+                        provider,
+                        source_system,
+                        transform_version,
+                        parquet_path,
+                        raw_payload_dir,
+                        manifest_json,
+                        _utcnow(),
+                    ],
+                )
+
+    def export_request_parquet_bundle(
+        self,
+        *,
+        request_id: str,
+        provider: str,
+        source_system: str,
+        transform_version: str,
+    ) -> Dict[str, Any]:
+        manifest_id = f"{request_id}_parquet"
+        bundle_dir = Path(self.config.storage.parquet_export_dir).expanduser() / request_id
+        manifest_path = Path(self.config.storage.manifest_dir).expanduser() / f"{manifest_id}.json"
+        self._ensure_parent_dirs()
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        for parquet_file in bundle_dir.glob("*.parquet"):
+            parquet_file.unlink()
+
+        export_specs = {
+            "request": (
+                bundle_dir / "request.parquet",
+                f"""
+                SELECT request_id, cache_key, provider, query_sequence, normalized_sequence,
+                       request_params_json, requested_at, status, error_text
+                FROM retrieval_requests
+                WHERE request_id = '{_sql_quote(request_id)}'
+                """,
+            ),
+            "runs": (
+                bundle_dir / "runs.parquet",
+                f"""
+                SELECT run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
+                       submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
+                FROM retrieval_runs
+                WHERE request_id = '{_sql_quote(request_id)}'
+                ORDER BY submitted_at ASC
+                """,
+            ),
+            "hits": (
+                bundle_dir / "hits.parquet",
+                f"""
+                SELECT h.run_id, h.hit_rank, h.accession, h.title, h.organism, h.e_value, h.bit_score,
+                       h.identity_fraction, h.positives_fraction, h.query_coverage, h.subject_coverage,
+                       h.alignment_length, h.subject_length, h.raw_hit_json
+                FROM blast_hits h
+                INNER JOIN retrieval_runs r ON r.run_id = h.run_id
+                WHERE r.request_id = '{_sql_quote(request_id)}'
+                ORDER BY h.run_id ASC, h.hit_rank ASC
+                """,
+            ),
+            "alignments": (
+                bundle_dir / "alignments.parquet",
+                f"""
+                SELECT a.run_id, a.hit_rank, a.hsp_index, a.query_from_pos, a.query_to_pos,
+                       a.subject_from_pos, a.subject_to_pos, a.alignment_length, a.identity_count,
+                       a.positive_count, a.gap_count, a.query_sequence, a.subject_sequence, a.midline,
+                       a.raw_alignment_json
+                FROM blast_alignments a
+                INNER JOIN retrieval_runs r ON r.run_id = a.run_id
+                WHERE r.request_id = '{_sql_quote(request_id)}'
+                ORDER BY a.run_id ASC, a.hit_rank ASC, a.hsp_index ASC
+                """,
+            ),
+            "annotations": (
+                bundle_dir / "annotations.parquet",
+                f"""
+                SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                       organism, annotation_json, retrieved_at, transform_version
+                FROM protein_annotations
+                WHERE request_id = '{_sql_quote(request_id)}'
+                ORDER BY hit_rank ASC
+                """,
+            ),
+            "evidence_documents": (
+                bundle_dir / "evidence_documents.parquet",
+                f"""
+                SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                       content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
+                FROM evidence_documents
+                WHERE request_id = '{_sql_quote(request_id)}'
+                ORDER BY hit_rank ASC NULLS LAST, created_at ASC NULLS LAST
+                """,
+            ),
+        }
+
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE evidence_documents SET manifest_id = ? WHERE request_id = ?",
+                    [manifest_id, request_id],
+                )
+                for parquet_path, query in export_specs.values():
+                    conn.execute(
+                        f"COPY ({query}) TO '{_sql_quote(str(parquet_path))}' (FORMAT PARQUET)"
+                    )
+                count_row = conn.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM retrieval_runs WHERE request_id = ?) AS run_count,
+                        (SELECT COUNT(*) FROM blast_hits h INNER JOIN retrieval_runs r ON r.run_id = h.run_id WHERE r.request_id = ?) AS hit_count,
+                        (SELECT COUNT(*) FROM blast_alignments a INNER JOIN retrieval_runs r ON r.run_id = a.run_id WHERE r.request_id = ?) AS alignment_count,
+                        (SELECT COUNT(*) FROM protein_annotations WHERE request_id = ?) AS annotation_count,
+                        (SELECT COUNT(*) FROM evidence_documents WHERE request_id = ?) AS evidence_count
+                    """,
+                    [request_id, request_id, request_id, request_id, request_id],
+                ).fetchone()
+
+        parquet_files = {
+            name: str(path)
+            for name, (path, _query) in export_specs.items()
+        }
+        manifest = {
+            "manifest_id": manifest_id,
+            "request_id": request_id,
+            "provider": provider,
+            "source_system": source_system,
+            "transform_version": transform_version,
+            "parquet_path": str(bundle_dir),
+            "raw_payload_dir": self.config.storage.raw_payload_dir,
+            "manifest_path": str(manifest_path),
+            "parquet_files": parquet_files,
+            "run_count": int(count_row[0] or 0),
+            "hit_count": int(count_row[1] or 0),
+            "alignment_count": int(count_row[2] or 0),
+            "annotation_count": int(count_row[3] or 0),
+            "evidence_count": int(count_row[4] or 0),
+            "created_at": _utcnow().isoformat(),
+        }
+        manifest_json = json.dumps(manifest, sort_keys=True)
+        manifest_path.write_text(manifest_json, encoding="utf-8")
+        self.upsert_dataset_manifest(
+            manifest_id=manifest_id,
+            provider=provider,
+            source_system=source_system,
+            transform_version=transform_version,
+            parquet_path=str(bundle_dir),
+            raw_payload_dir=self.config.storage.raw_payload_dir,
+            manifest_json=manifest_json,
+        )
+        manifest["evidence_manifest_updated"] = True
+        return manifest
+
     def upsert_cache_entry(
         self,
         *,
@@ -545,6 +732,7 @@ class RetrievalStore:
                         "alignments": [],
                         "annotations": [],
                         "evidence_documents": [],
+                        "dataset_manifests": [],
                     }
 
                 latest_run_id = runs[-1]["run_id"]
@@ -615,6 +803,36 @@ class RetrievalStore:
                     if isinstance(evidence_document.get("content_json"), str):
                         evidence_document["content"] = json.loads(evidence_document.pop("content_json"))
 
+                manifest_ids = [
+                    row[0]
+                    for row in conn.execute(
+                        """
+                        SELECT DISTINCT manifest_id
+                        FROM evidence_documents
+                        WHERE request_id = ? AND manifest_id IS NOT NULL
+                        ORDER BY manifest_id ASC
+                        """,
+                        [request_id],
+                    ).fetchall()
+                ]
+                dataset_manifests: List[Dict[str, Any]] = []
+                if manifest_ids:
+                    manifest_cur = conn.execute(
+                        f"""
+                        SELECT manifest_id, provider, source_system, transform_version, parquet_path,
+                               raw_payload_dir, manifest_json, created_at
+                        FROM dataset_manifests
+                        WHERE manifest_id IN ({",".join("?" for _ in manifest_ids)})
+                        ORDER BY created_at ASC
+                        """,
+                        manifest_ids,
+                    )
+                    manifest_cols = [desc[0] for desc in manifest_cur.description]
+                    dataset_manifests = [self._row_to_dict(manifest_cols, row) for row in manifest_cur.fetchall()]
+                    for manifest in dataset_manifests:
+                        if isinstance(manifest.get("manifest_json"), str):
+                            manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
+
                 return {
                     **request_data,
                     "runs": runs,
@@ -622,6 +840,7 @@ class RetrievalStore:
                     "alignments": alignments,
                     "annotations": annotations,
                     "evidence_documents": evidence_documents,
+                    "dataset_manifests": dataset_manifests,
                 }
 
     def schema_tables(self) -> set[str]:

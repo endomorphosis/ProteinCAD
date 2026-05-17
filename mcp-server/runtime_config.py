@@ -262,6 +262,7 @@ def _apply_retrieval_env_overrides(cfg: "MCPServerConfig") -> bool:
             "MCP_RETRIEVAL_EXPOSE_MCP": "expose_mcp",
             "MCP_RETRIEVAL_ENABLE_JOB_GROUNDING": "allow_job_grounding",
             "MCP_RETRIEVAL_EVIDENCE_ENRICHMENT": "evidence_enrichment",
+            "MCP_RETRIEVAL_EXPORT_PARQUET": "export_parquet",
             "MCP_RETRIEVAL_CREATE_SCHEMA_ON_STARTUP": "create_schema_on_startup",
         }
         for env_name, field_name in feature_flag_bools.items():
@@ -471,6 +472,7 @@ class RetrievalFeatureFlags(BaseModel):
     expose_mcp: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPOSE_MCP"))
     allow_job_grounding: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING"))
     evidence_enrichment: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EVIDENCE_ENRICHMENT"))
+    export_parquet: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPORT_PARQUET"))
     create_schema_on_startup: bool = Field(default_factory=lambda: _env_bool("MCP_RETRIEVAL_CREATE_SCHEMA_ON_STARTUP", True))
 
 
