@@ -17,7 +17,7 @@ from runtime_config import RetrievalConfig
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_STATEMENTS = (
     # Latest schema definition for fresh databases.
@@ -141,6 +141,8 @@ SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS dataset_manifests (
         manifest_id VARCHAR PRIMARY KEY,
+        request_id VARCHAR NOT NULL,
+        run_id VARCHAR,
         provider VARCHAR NOT NULL,
         source_system VARCHAR NOT NULL,
         transform_version VARCHAR NOT NULL,
@@ -160,15 +162,13 @@ MIGRATION_STATEMENTS = (
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_system VARCHAR",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS source_id VARCHAR",
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS request_id VARCHAR",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS run_id VARCHAR",
 )
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _sql_quote(value: str) -> str:
-    return value.replace("'", "''")
 
 
 @dataclass
@@ -212,7 +212,7 @@ class RetrievalStore:
                     VALUES (?, ?, ?)
                     ON CONFLICT DO NOTHING
                     """,
-                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment", _utcnow()],
+                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment and parquet exports", _utcnow()],
                 )
             self.initialized = True
             self.last_error = None
@@ -465,6 +465,8 @@ class RetrievalStore:
         self,
         *,
         manifest_id: str,
+        request_id: str,
+        run_id: Optional[str],
         provider: str,
         source_system: str,
         transform_version: str,
@@ -477,11 +479,13 @@ class RetrievalStore:
                 conn.execute(
                     """
                     INSERT INTO dataset_manifests (
-                        manifest_id, provider, source_system, transform_version, parquet_path,
+                        manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
                         raw_payload_dir, manifest_json, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (manifest_id) DO UPDATE SET
+                        request_id = excluded.request_id,
+                        run_id = excluded.run_id,
                         provider = excluded.provider,
                         source_system = excluded.source_system,
                         transform_version = excluded.transform_version,
@@ -492,6 +496,8 @@ class RetrievalStore:
                     """,
                     [
                         manifest_id,
+                        request_id,
+                        run_id,
                         provider,
                         source_system,
                         transform_version,
@@ -506,6 +512,7 @@ class RetrievalStore:
         self,
         *,
         request_id: str,
+        run_id: Optional[str],
         provider: str,
         source_system: str,
         transform_version: str,
@@ -521,65 +528,65 @@ class RetrievalStore:
         export_specs = {
             "request": (
                 bundle_dir / "request.parquet",
-                f"""
+                """
                 SELECT request_id, cache_key, provider, query_sequence, normalized_sequence,
                        request_params_json, requested_at, status, error_text
                 FROM retrieval_requests
-                WHERE request_id = '{_sql_quote(request_id)}'
+                WHERE request_id = $1
                 """,
             ),
             "runs": (
                 bundle_dir / "runs.parquet",
-                f"""
+                """
                 SELECT run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
                        submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
                 FROM retrieval_runs
-                WHERE request_id = '{_sql_quote(request_id)}'
+                WHERE request_id = $1
                 ORDER BY submitted_at ASC
                 """,
             ),
             "hits": (
                 bundle_dir / "hits.parquet",
-                f"""
+                """
                 SELECT h.run_id, h.hit_rank, h.accession, h.title, h.organism, h.e_value, h.bit_score,
                        h.identity_fraction, h.positives_fraction, h.query_coverage, h.subject_coverage,
                        h.alignment_length, h.subject_length, h.raw_hit_json
                 FROM blast_hits h
                 INNER JOIN retrieval_runs r ON r.run_id = h.run_id
-                WHERE r.request_id = '{_sql_quote(request_id)}'
+                WHERE r.request_id = $1
                 ORDER BY h.run_id ASC, h.hit_rank ASC
                 """,
             ),
             "alignments": (
                 bundle_dir / "alignments.parquet",
-                f"""
+                """
                 SELECT a.run_id, a.hit_rank, a.hsp_index, a.query_from_pos, a.query_to_pos,
                        a.subject_from_pos, a.subject_to_pos, a.alignment_length, a.identity_count,
                        a.positive_count, a.gap_count, a.query_sequence, a.subject_sequence, a.midline,
                        a.raw_alignment_json
                 FROM blast_alignments a
                 INNER JOIN retrieval_runs r ON r.run_id = a.run_id
-                WHERE r.request_id = '{_sql_quote(request_id)}'
+                WHERE r.request_id = $1
                 ORDER BY a.run_id ASC, a.hit_rank ASC, a.hsp_index ASC
                 """,
             ),
             "annotations": (
                 bundle_dir / "annotations.parquet",
-                f"""
+                """
                 SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
                        organism, annotation_json, retrieved_at, transform_version
                 FROM protein_annotations
-                WHERE request_id = '{_sql_quote(request_id)}'
+                WHERE request_id = $1
                 ORDER BY hit_rank ASC
                 """,
             ),
             "evidence_documents": (
                 bundle_dir / "evidence_documents.parquet",
-                f"""
+                """
                 SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
                        content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
                 FROM evidence_documents
-                WHERE request_id = '{_sql_quote(request_id)}'
+                WHERE request_id = $1
                 ORDER BY hit_rank ASC NULLS LAST, created_at ASC NULLS LAST
                 """,
             ),
@@ -593,7 +600,8 @@ class RetrievalStore:
                 )
                 for parquet_path, query in export_specs.values():
                     conn.execute(
-                        f"COPY ({query}) TO '{_sql_quote(str(parquet_path))}' (FORMAT PARQUET)"
+                        f"COPY ({query}) TO $2 (FORMAT PARQUET)",
+                        [request_id, str(parquet_path)],
                     )
                 count_row = conn.execute(
                     """
@@ -614,6 +622,7 @@ class RetrievalStore:
         manifest = {
             "manifest_id": manifest_id,
             "request_id": request_id,
+            "run_id": run_id,
             "provider": provider,
             "source_system": source_system,
             "transform_version": transform_version,
@@ -632,6 +641,8 @@ class RetrievalStore:
         manifest_path.write_text(manifest_json, encoding="utf-8")
         self.upsert_dataset_manifest(
             manifest_id=manifest_id,
+            request_id=request_id,
+            run_id=run_id,
             provider=provider,
             source_system=source_system,
             transform_version=transform_version,
@@ -803,35 +814,21 @@ class RetrievalStore:
                     if isinstance(evidence_document.get("content_json"), str):
                         evidence_document["content"] = json.loads(evidence_document.pop("content_json"))
 
-                manifest_ids = [
-                    row[0]
-                    for row in conn.execute(
-                        """
-                        SELECT DISTINCT manifest_id
-                        FROM evidence_documents
-                        WHERE request_id = ? AND manifest_id IS NOT NULL
-                        ORDER BY manifest_id ASC
-                        """,
-                        [request_id],
-                    ).fetchall()
-                ]
-                dataset_manifests: List[Dict[str, Any]] = []
-                if manifest_ids:
-                    manifest_cur = conn.execute(
-                        f"""
-                        SELECT manifest_id, provider, source_system, transform_version, parquet_path,
-                               raw_payload_dir, manifest_json, created_at
-                        FROM dataset_manifests
-                        WHERE manifest_id IN ({",".join("?" for _ in manifest_ids)})
-                        ORDER BY created_at ASC
-                        """,
-                        manifest_ids,
-                    )
-                    manifest_cols = [desc[0] for desc in manifest_cur.description]
-                    dataset_manifests = [self._row_to_dict(manifest_cols, row) for row in manifest_cur.fetchall()]
-                    for manifest in dataset_manifests:
-                        if isinstance(manifest.get("manifest_json"), str):
-                            manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
+                manifest_cur = conn.execute(
+                    """
+                    SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
+                           raw_payload_dir, manifest_json, created_at
+                    FROM dataset_manifests
+                    WHERE request_id = ?
+                    ORDER BY created_at ASC
+                    """,
+                    [request_id],
+                )
+                manifest_cols = [desc[0] for desc in manifest_cur.description]
+                dataset_manifests = [self._row_to_dict(manifest_cols, row) for row in manifest_cur.fetchall()]
+                for manifest in dataset_manifests:
+                    if isinstance(manifest.get("manifest_json"), str):
+                        manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
 
                 return {
                     **request_data,

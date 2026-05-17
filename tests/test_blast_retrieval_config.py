@@ -91,8 +91,8 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
         }
     assert {"run_id", "hit_rank", "source_system", "source_id", "retrieved_at"} <= evidence_columns
     versions = store.migration_versions()
-    assert 3 in versions
-    assert max(versions) == 3
+    assert 4 in versions
+    assert max(versions) == 4
 
 
 def test_retrieval_store_skips_schema_when_disabled(tmp_path):
@@ -204,6 +204,8 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     assert len(first.result["dataset_manifests"]) == 1
     manifest = first.result["dataset_manifests"][0]
     assert manifest["manifest_id"] == f"{first.request_id}_parquet"
+    assert manifest["request_id"] == first.request_id
+    assert manifest["run_id"] == first.run_id
     assert manifest["provider"] == "ncbi_blast_remote"
     assert Path(manifest["parquet_path"]).is_dir() is True
     assert Path(manifest["manifest"]["manifest_path"]).is_file() is True
@@ -218,8 +220,85 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     assert second.annotation_count == 1
     assert second.evidence_count == 1
     assert second.result["evidence_packet"]["document_count"] == 1
-    assert second.result["dataset_manifests"][0]["manifest_id"] == f"{first.request_id}_parquet"
+    assert second.result["dataset_manifests"][0]["manifest_id"] == f"{second.request_id}_parquet"
     assert request_counts == {"submit": 1, "search_info": 2, "result": 1}
+
+
+def test_remote_retrieval_service_exports_parquet_without_evidence_documents(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.feature_flags.evidence_enrichment = False
+    cfg.retrieval.feature_flags.export_parquet = True
+    cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+    cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
+    cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
+    cfg.retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
+
+    xml_payload = """<?xml version="1.0"?>
+<BlastOutput>
+  <BlastOutput_iterations>
+    <Iteration>
+      <Iteration_hits>
+        <Hit>
+          <Hit_def>Example protein [Testus organismus]</Hit_def>
+          <Hit_accession>ABC123</Hit_accession>
+          <Hit_len>100</Hit_len>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_bit-score>55.0</Hsp_bit-score>
+              <Hsp_evalue>1e-20</Hsp_evalue>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>10</Hsp_query-to>
+              <Hsp_hit-from>5</Hsp_hit-from>
+              <Hsp_hit-to>14</Hsp_hit-to>
+              <Hsp_identity>8</Hsp_identity>
+              <Hsp_positive>9</Hsp_positive>
+              <Hsp_align-len>10</Hsp_align-len>
+              <Hsp_gaps>0</Hsp_gaps>
+              <Hsp_qseq>ACDEFGHIKL</Hsp_qseq>
+              <Hsp_hseq>ACDEYGHIKL</Hsp_hseq>
+              <Hsp_midline>|||| |||||</Hsp_midline>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+      </Iteration_hits>
+    </Iteration>
+  </BlastOutput_iterations>
+</BlastOutput>
+"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.method == "POST":
+            return httpx.Response(200, text="RID = TEST123\nRTOE = 0\n")
+        if params.get("FORMAT_OBJECT") == "SearchInfo":
+            return httpx.Response(200, text="Status=READY\nThereAreHits=yes\n")
+        if params.get("FORMAT_TYPE") == "XML":
+            return httpx.Response(200, text=xml_payload)
+        return httpx.Response(400, text="unexpected request")
+
+    store = RetrievalStore(cfg.retrieval)
+    service = BlastRetrievalService(
+        config=cfg.retrieval,
+        store=store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+
+    result = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
+
+    assert result.status == "completed"
+    assert result.annotation_count == 0
+    assert result.evidence_count == 0
+    assert len(result.result["dataset_manifests"]) == 1
+    manifest = result.result["dataset_manifests"][0]
+    assert manifest["manifest_id"] == f"{result.request_id}_parquet"
+    assert manifest["request_id"] == result.request_id
+    assert manifest["run_id"] == result.run_id
+    assert manifest["manifest"]["evidence_count"] == 0
+    assert Path(manifest["manifest"]["parquet_files"]["hits"]).is_file() is True
+    assert Path(manifest["manifest"]["parquet_files"]["evidence_documents"]).is_file() is True
 
 
 def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):

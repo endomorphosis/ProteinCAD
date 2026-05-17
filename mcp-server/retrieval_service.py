@@ -270,12 +270,13 @@ class BlastRetrievalService:
         self._store.replace_alignments(run_id, serialize_alignments(provider_result.alignments))
         self._store.replace_annotations(request_id, [asdict(annotation) for annotation in annotations])
         self._store.replace_evidence_documents(request_id, [asdict(evidence_document) for evidence_document in evidence_documents])
-        if self._config.feature_flags.export_parquet and evidence_documents:
+        if self._config.feature_flags.export_parquet:
             self._store.export_request_parquet_bundle(
                 request_id=request_id,
+                run_id=run_id,
                 provider=provider_result.provider_name,
                 source_system="ncbi_blast",
-                transform_version=evidence_documents[0].transform_version,
+                transform_version=EVIDENCE_TRANSFORM_VERSION,
             )
         self._store.update_request_status(request_id, "completed")
         self._store.upsert_cache_entry(
