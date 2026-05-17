@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -521,13 +522,12 @@ class RetrievalStore:
         manifest_id = f"{request_id}_parquet"
         bundle_root = Path(self.config.storage.parquet_export_dir).expanduser()
         bundle_dir = bundle_root / request_id
-        temp_bundle_dir = bundle_root / f".{request_id}.tmp"
+        temp_bundle_dir = Path(
+            tempfile.mkdtemp(prefix="parquet-export-", dir=str(bundle_root))
+        )
         manifest_path = Path(self.config.storage.manifest_dir).expanduser() / f"{manifest_id}.json"
         temp_manifest_path = manifest_path.with_suffix(".tmp.json")
         self._ensure_parent_dirs()
-        if temp_bundle_dir.exists():
-            shutil.rmtree(temp_bundle_dir)
-        temp_bundle_dir.mkdir(parents=True, exist_ok=True)
 
         parquet_files = {
             "request": str(temp_bundle_dir / "request.parquet"),
