@@ -16,7 +16,7 @@ import contextlib
 from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -29,6 +29,7 @@ from runtime_config import RuntimeConfigManager
 from gpu_init import setup_gpu_for_server
 from retrieval_store import RetrievalStore
 from retrieval_service import BlastRetrievalService
+from retrieval_provider import RetrievalConfigError, RetrievalError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1028,6 +1029,11 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             return _jsonrpc_result(msg_id, None)
 
         return _jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
+    except RetrievalConfigError as exc:
+        return _jsonrpc_error(msg_id, -32602, str(exc))
+    except RetrievalError as exc:
+        logger.warning("Retrieval MCP tool failed: %s", exc)
+        return _jsonrpc_error(msg_id, -32000, str(exc))
     except Exception:
         logger.exception("Unhandled MCP JSON-RPC error")
         return _jsonrpc_error(msg_id, -32603, "Internal server error")
@@ -1091,10 +1097,10 @@ async def get_retrieval_request(request_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/retrieval/cache")
-async def list_retrieval_cache(limit: int = 100) -> Dict[str, Any]:
+async def list_retrieval_cache(limit: int = Query(100, ge=1, le=1000)) -> Dict[str, Any]:
     """List cached BLAST retrieval entries."""
     _ensure_retrieval_rest_enabled()
-    entries = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=max(1, limit))
+    entries = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=limit)
     return {"entries": entries}
 
 
