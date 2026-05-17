@@ -5,13 +5,14 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from typing import Callable, Dict, Tuple
 
 import duckdb
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
-server_module = importlib.import_module("server")
+mcp_server_module = importlib.import_module("server")
 
 from retrieval_provider import parse_submission_response
 from retrieval_service import BlastRetrievalService
@@ -53,7 +54,7 @@ MOCK_BLAST_XML = """<?xml version="1.0"?>
 """
 
 
-def _mock_blast_handler():
+def _mock_blast_handler() -> Tuple[Callable[[httpx.Request], httpx.Response], Dict[str, int]]:
     request_counts = {"submit": 0, "search_info": 0, "result": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -75,7 +76,7 @@ def _mock_blast_handler():
 
 
 def _configure_and_reset_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
-    server = server_module
+    server = mcp_server_module
     retrieval = server.config_manager.get().retrieval
     retrieval.feature_flags.enabled = True
     retrieval.feature_flags.expose_rest = True

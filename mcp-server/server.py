@@ -176,7 +176,9 @@ def _ensure_retrieval_mcp_enabled() -> None:
 def _serialize_retrieval_result(result: Any) -> Dict[str, Any]:
     if hasattr(result, "__dataclass_fields__"):
         return asdict(result)
-    return dict(result)
+    if isinstance(result, dict):
+        return result
+    raise TypeError(f"Unsupported retrieval result payload type: {type(result).__name__}")
 
 
 @app.get("/api/config")
