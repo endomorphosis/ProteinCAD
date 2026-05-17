@@ -11,7 +11,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
-SERVER_MODULE = importlib.import_module("server")
+server_module = importlib.import_module("server")
 
 from retrieval_provider import parse_submission_response
 from retrieval_service import BlastRetrievalService
@@ -75,7 +75,7 @@ def _mock_blast_handler():
 
 
 def _configure_and_reset_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
-    server = SERVER_MODULE
+    server = server_module
     retrieval = server.config_manager.get().retrieval
     retrieval.feature_flags.enabled = True
     retrieval.feature_flags.expose_rest = True

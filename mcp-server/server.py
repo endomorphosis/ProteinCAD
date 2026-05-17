@@ -1029,11 +1029,12 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             return _jsonrpc_result(msg_id, None)
 
         return _jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
-    except RetrievalConfigError as exc:
-        return _jsonrpc_error(msg_id, -32602, str(exc))
-    except RetrievalError as exc:
-        logger.warning("Retrieval MCP tool failed: %s", exc)
-        return _jsonrpc_error(msg_id, -32000, str(exc))
+    except RetrievalConfigError:
+        logger.warning("Invalid BLAST retrieval MCP request")
+        return _jsonrpc_error(msg_id, -32602, "Invalid BLAST retrieval request")
+    except RetrievalError:
+        logger.warning("BLAST retrieval MCP tool failed")
+        return _jsonrpc_error(msg_id, -32000, "BLAST retrieval failed")
     except Exception:
         logger.exception("Unhandled MCP JSON-RPC error")
         return _jsonrpc_error(msg_id, -32603, "Internal server error")
