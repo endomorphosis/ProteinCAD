@@ -110,6 +110,7 @@ def _configure_and_reset_server_for_retrieval(
 
 def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
     monkeypatch.delenv("MCP_RETRIEVAL_ENABLED", raising=False)
+    monkeypatch.delenv("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING", raising=False)
     monkeypatch.delenv("MCP_RETRIEVAL_DATA_DIR", raising=False)
     monkeypatch.delenv("MCP_RETRIEVAL_DUCKDB_PATH", raising=False)
     config_path = tmp_path / "config" / "mcp_config.json"
@@ -119,6 +120,7 @@ def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
 
     assert retrieval.provider == "ncbi_blast_remote"
     assert retrieval.feature_flags.enabled is False
+    assert retrieval.feature_flags.allow_job_grounding is False
     assert retrieval.feature_flags.export_parquet is False
     assert retrieval.blast.default_program == "blastp"
     assert retrieval.blast.default_database == "swissprot"
@@ -129,6 +131,7 @@ def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
 
 def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_RETRIEVAL_ENABLED", "true")
+    monkeypatch.setenv("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING", "true")
     monkeypatch.setenv("MCP_RETRIEVAL_PROVIDER", "local_blast")
     monkeypatch.setenv("MCP_RETRIEVAL_DATA_DIR", str(tmp_path / "blast-data"))
     monkeypatch.setenv("MCP_RETRIEVAL_PROGRAM", "blastx")
@@ -144,6 +147,7 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
 
     assert cfg.retrieval.provider == "local_blast"
     assert retrieval.feature_flags.enabled is True
+    assert retrieval.feature_flags.allow_job_grounding is True
     assert retrieval.feature_flags.export_parquet is True
     assert retrieval.provider == "local_blast"
     assert retrieval.blast.default_program == "blastx"

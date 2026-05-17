@@ -29,19 +29,19 @@ If the snapshot is stale, update it before starting implementation work.
 - **Status**: Milestone 3 in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
 - **Current milestone**: Milestone 3 — MCP server exposure
-- **Next in-progress task**: decide whether BLAST grounding stays opt-in once MCP endpoints/resources exist
+- **Next in-progress task**: add dashboard retrieval settings/evidence rendering
 - **Primary edit targets**:
-  - `mcp-server/server.py`
+  - `mcp-dashboard/components/BackendSettings.tsx`
+  - `mcp-dashboard/components/ResultsViewer.tsx`
+  - `mcp-dashboard/lib/mcp-client.ts`
   - `docs/BLAST_RAG_TODO.md`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
-  - `mcp-dashboard/components/SettingsPanel.tsx`
-  - `mcp-dashboard/components/ResultsViewer.tsx`
 - **Open decisions blocking deeper implementation**:
-  - whether BLAST grounding is opt-in or enabled by default for design jobs
+  - none
 - **Recommended first implementation slice**:
-  1. decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
-  2. add dashboard retrieval settings/evidence rendering
-  3. thread retrieval evidence bundles into design jobs once the grounding toggle semantics are settled
+  1. add dashboard retrieval settings/evidence rendering
+  2. add per-job retrieval status + cached evidence browser UX
+  3. thread retrieval evidence bundles into design jobs using the opt-in grounding policy
   4. add dashboard tests around retrieval settings and evidence browsing
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
@@ -177,9 +177,9 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
+1. [x] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
 2. [ ] Add dashboard retrieval settings/evidence rendering
-3. [ ] Thread retrieval evidence bundles into design jobs once the grounding toggle semantics are settled
+3. [ ] Thread retrieval evidence bundles into design jobs using the opt-in grounding policy
 4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
 5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
 
@@ -189,18 +189,20 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: add MCP resources for cached evidence bundles — list/read cached retrieval bundles and persisted dataset manifests through MCP resources and cover them with mocked ASGI tests
-- **Next recommended task**: decide whether BLAST grounding stays opt-in once MCP endpoints/resources exist
+- **Last completed task**: decide grounding policy — keep BLAST design-job grounding opt-in by default after MCP endpoint/resource exposure and lock behavior in runtime-config tests
+- **Next recommended task**: add dashboard retrieval settings/evidence rendering
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
-  - `mcp-server/server.py`
-  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
-  - `mcp-dashboard/components/SettingsPanel.tsx`
+  - `mcp-dashboard/components/BackendSettings.tsx`
   - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `tests/test_blast_retrieval_config.py`
+  - `mcp-dashboard/lib/mcp-client.ts`
+  - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
-  - decide whether BLAST grounding stays opt-in once MCP endpoints/resources exist
+  - none
 - **Validation to run next time**:
+  - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run lint`
+  - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run build`
+  - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && E2E_PORT=3401 npm run test:e2e`
   - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_blast_retrieval_config.py`
   - `docker build -t test-mcp-server /home/runner/work/ProteinCAD/ProteinCAD/mcp-server`
 

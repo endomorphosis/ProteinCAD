@@ -28,7 +28,8 @@ The recommended rollout is incremental:
 - The `ipfs_datasets_py` boundary is now defined: BLAST query-time retrieval, caching, normalization, and evidence packets stay in the MCP server; only non-BLAST scraping, heterogeneous ETL, Parquet packaging, and optional IPFS publication should cross into `ipfs_datasets_py`.
 - Milestone 2 now also supports optional DuckDB-backed Parquet bundle export plus dataset manifest persistence for enriched retrieval batches.
 - Milestone 3 now exposes retrieval through REST submit/status/cache endpoints, MCP tools, and MCP resources for cached evidence bundles plus persisted dataset manifests.
-- Remaining work is focused on the grounding opt-in decision and dashboard UX.
+- Grounding policy decision: keep BLAST grounding opt-in for design jobs by default until dashboard controls and evidence UX are in place; use `MCP_RETRIEVAL_ENABLE_JOB_GROUNDING=true` to enable it explicitly.
+- Remaining work is focused on dashboard UX and design-job evidence wiring.
 
 ---
 
@@ -491,7 +492,6 @@ Success metrics:
 ## Open Decisions
 
 - Which BLAST program and database presets should be exposed first for protein workflows?
-- Should retrieval run automatically for every design job or remain opt-in at first?
 - Which annotation sources beyond BLAST hit metadata are worth enriching in milestone one?
 - How long should remote BLAST results remain in cache by default?
 - When should the project invest in local BLAST+ mirrors versus continuing with remote BLAST for the initial rollout?

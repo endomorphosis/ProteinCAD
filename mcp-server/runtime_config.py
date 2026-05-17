@@ -470,7 +470,8 @@ class RetrievalFeatureFlags(BaseModel):
     enabled: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_ENABLED"))
     expose_rest: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPOSE_REST"))
     expose_mcp: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPOSE_MCP"))
-    allow_job_grounding: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING"))
+    # Keep BLAST grounding opt-in for design jobs until dashboard UX + evidence rendering land.
+    allow_job_grounding: bool = Field(default_factory=lambda: _env_bool("MCP_RETRIEVAL_ENABLE_JOB_GROUNDING", False))
     evidence_enrichment: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EVIDENCE_ENRICHMENT"))
     export_parquet: bool = Field(default_factory=lambda: _truthy_env("MCP_RETRIEVAL_EXPORT_PARQUET"))
     create_schema_on_startup: bool = Field(default_factory=lambda: _env_bool("MCP_RETRIEVAL_CREATE_SCHEMA_ON_STARTUP", True))
