@@ -438,220 +438,220 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
     """List available MCP tools"""
     tools = [
         ToolInfo(
-                name="get_runtime_config",
-                description="Get the MCP server runtime routing/provider config",
-                inputSchema={"type": "object", "properties": {}},
-            ),
+            name="get_runtime_config",
+            description="Get the MCP server runtime routing/provider config",
+            inputSchema={"type": "object", "properties": {}},
+        ),
         ToolInfo(
-                name="update_runtime_config",
-                description="Update the MCP server runtime config (deep-merged and persisted when enabled)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "patch": {
-                            "type": "object",
-                            "description": "Partial config patch to merge into current config",
-                        }
-                    },
+            name="update_runtime_config",
+            description="Update the MCP server runtime config (deep-merged and persisted when enabled)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "object",
+                        "description": "Partial config patch to merge into current config",
+                    }
                 },
-            ),
+            },
+        ),
         ToolInfo(
-                name="reset_runtime_config",
-                description="Reset the MCP server runtime config to defaults",
-                inputSchema={"type": "object", "properties": {}},
-            ),
+            name="reset_runtime_config",
+            description="Reset the MCP server runtime config to defaults",
+            inputSchema={"type": "object", "properties": {}},
+        ),
         ToolInfo(
-                name="embedded_bootstrap",
-                description="Trigger best-effort embedded asset bootstrap/download into /models",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "models": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Subset of models to bootstrap: proteinmpnn, rfdiffusion, alphafold",
-                        }
-                    },
+            name="embedded_bootstrap",
+            description="Trigger best-effort embedded asset bootstrap/download into /models",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "models": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Subset of models to bootstrap: proteinmpnn, rfdiffusion, alphafold",
+                    }
                 },
-            ),
+            },
+        ),
         ToolInfo(
-                name="design_protein_binder",
-                description="Design protein binders for a target sequence",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequence": {
-                            "type": "string",
-                            "description": "Target protein amino acid sequence"
-                        },
-                        "job_name": {
-                            "type": "string",
-                            "description": "Optional name for the job"
-                        },
-                        "num_designs": {
-                            "type": "integer",
-                            "description": "Number of binder designs to generate",
-                            "default": 5
-                        }
+            name="design_protein_binder",
+            description="Design protein binders for a target sequence",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Target protein amino acid sequence"
                     },
-                    "required": ["sequence"]
-                }
-            ),
-        ToolInfo(
-                name="get_job_status",
-                description="Get the status of a protein design job",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {
-                            "type": "string",
-                            "description": "Job ID to query"
-                        }
+                    "job_name": {
+                        "type": "string",
+                        "description": "Optional name for the job"
                     },
-                    "required": ["job_id"]
-                }
-            ),
+                    "num_designs": {
+                        "type": "integer",
+                        "description": "Number of binder designs to generate",
+                        "default": 5
+                    }
+                },
+                "required": ["sequence"]
+            }
+        ),
         ToolInfo(
-                name="list_jobs",
-                description="List all protein design jobs",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
+            name="get_job_status",
+            description="Get the status of a protein design job",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Job ID to query"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        ),
         ToolInfo(
-                name="delete_job",
-                description="Delete a protein design job",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {
-                            "type": "string",
-                            "description": "Job ID to delete"
-                        }
+            name="list_jobs",
+            description="List all protein design jobs",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="delete_job",
+            description="Delete a protein design job",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Job ID to delete"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        ),
+        ToolInfo(
+            name="check_services",
+            description="Check status of all backend services (NIM/native/hybrid)",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="predict_structure",
+            description="Predict structure from sequence (AlphaFold2 backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Protein amino acid sequence"
+                    }
+                },
+                "required": ["sequence"]
+            }
+        ),
+        ToolInfo(
+            name="design_binder_backbone",
+            description="Generate binder backbones from a target PDB (RFDiffusion backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_pdb": {
+                        "type": "string",
+                        "description": "Target protein PDB content (string)"
                     },
-                    "required": ["job_id"]
-                }
-            ),
+                    "num_designs": {
+                        "type": "integer",
+                        "description": "Number of backbones to generate",
+                        "default": 5
+                    }
+                },
+                "required": ["target_pdb"]
+            }
+        ),
         ToolInfo(
-                name="check_services",
-                description="Check status of all backend services (NIM/native/hybrid)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
+            name="generate_sequence",
+            description="Generate binder sequence from a backbone PDB (ProteinMPNN backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "backbone_pdb": {
+                        "type": "string",
+                        "description": "Backbone PDB content (string)"
+                    }
+                },
+                "required": ["backbone_pdb"]
+            }
+        ),
         ToolInfo(
-                name="predict_structure",
-                description="Predict structure from sequence (AlphaFold2 backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequence": {
-                            "type": "string",
-                            "description": "Protein amino acid sequence"
-                        }
+            name="predict_complex",
+            description="Predict complex structure from sequences (AlphaFold2-Multimer backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of chain sequences"
+                    }
+                },
+                "required": ["sequences"]
+            }
+        ),
+        ToolInfo(
+            name="get_alphafold_settings",
+            description="Get current AlphaFold optimization settings",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="update_alphafold_settings",
+            description="Update AlphaFold optimization settings (speed_preset, disable_templates, num_recycles, etc.)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "speed_preset": {
+                        "type": "string",
+                        "description": "Speed preset: fast (29% faster), balanced (20% faster, default), quality (slowest)"
                     },
-                    "required": ["sequence"]
-                }
-            ),
-        ToolInfo(
-                name="design_binder_backbone",
-                description="Generate binder backbones from a target PDB (RFDiffusion backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "target_pdb": {
-                            "type": "string",
-                            "description": "Target protein PDB content (string)"
-                        },
-                        "num_designs": {
-                            "type": "integer",
-                            "description": "Number of backbones to generate",
-                            "default": 5
-                        }
+                    "disable_templates": {
+                        "type": "boolean",
+                        "description": "Disable template search for speed"
                     },
-                    "required": ["target_pdb"]
-                }
-            ),
-        ToolInfo(
-                name="generate_sequence",
-                description="Generate binder sequence from a backbone PDB (ProteinMPNN backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "backbone_pdb": {
-                            "type": "string",
-                            "description": "Backbone PDB content (string)"
-                        }
+                    "num_recycles": {
+                        "type": "integer",
+                        "description": "Number of recycling iterations (3 for speed, -1 for model default ~20)"
                     },
-                    "required": ["backbone_pdb"]
-                }
-            ),
-        ToolInfo(
-                name="predict_complex",
-                description="Predict complex structure from sequences (AlphaFold2-Multimer backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequences": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of chain sequences"
-                        }
+                    "num_ensemble": {
+                        "type": "integer",
+                        "description": "Number of ensemble evaluations"
                     },
-                    "required": ["sequences"]
-                }
-            ),
-        ToolInfo(
-                name="get_alphafold_settings",
-                description="Get current AlphaFold optimization settings",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-        ToolInfo(
-                name="update_alphafold_settings",
-                description="Update AlphaFold optimization settings (speed_preset, disable_templates, num_recycles, etc.)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "speed_preset": {
-                            "type": "string",
-                            "description": "Speed preset: fast (29% faster), balanced (20% faster, default), quality (slowest)"
-                        },
-                        "disable_templates": {
-                            "type": "boolean",
-                            "description": "Disable template search for speed"
-                        },
-                        "num_recycles": {
-                            "type": "integer",
-                            "description": "Number of recycling iterations (3 for speed, -1 for model default ~20)"
-                        },
-                        "num_ensemble": {
-                            "type": "integer",
-                            "description": "Number of ensemble evaluations"
-                        },
-                        "mmseqs2_max_seqs": {
-                            "type": "integer",
-                            "description": "Maximum sequences for MMseqs2 MSA"
-                        },
-                        "msa_mode": {
-                            "type": "string",
-                            "description": "MSA mode: jackhmmer or mmseqs2"
-                        }
+                    "mmseqs2_max_seqs": {
+                        "type": "integer",
+                        "description": "Maximum sequences for MMseqs2 MSA"
+                    },
+                    "msa_mode": {
+                        "type": "string",
+                        "description": "MSA mode: jackhmmer or mmseqs2"
                     }
                 }
-            ),
+            }
+        ),
         ToolInfo(
-                name="reset_alphafold_settings",
-                description="Reset AlphaFold optimization settings to defaults",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
+            name="reset_alphafold_settings",
+            description="Reset AlphaFold optimization settings to defaults",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
     ]
     retrieval_cfg = _retrieval_runtime_config()
     if retrieval_cfg.feature_flags.enabled and retrieval_cfg.feature_flags.expose_mcp:
@@ -801,8 +801,8 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             if name == "start_blast_retrieval":
                 try:
                     _ensure_retrieval_mcp_enabled()
-                except RuntimeError as exc:
-                    return _jsonrpc_error(msg_id, -32000, str(exc))
+                except RuntimeError:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval MCP tools are disabled")
                 sequence = arguments.get("sequence")
                 if not sequence:
                     return _jsonrpc_error(msg_id, -32602, "Missing sequence")
@@ -823,14 +823,14 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             if name == "get_blast_retrieval":
                 try:
                     _ensure_retrieval_mcp_enabled()
-                except RuntimeError as exc:
-                    return _jsonrpc_error(msg_id, -32000, str(exc))
+                except RuntimeError:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval MCP tools are disabled")
                 request_id = arguments.get("request_id")
                 if not request_id:
                     return _jsonrpc_error(msg_id, -32602, "Missing request_id")
                 result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
                 if not result:
-                    return _jsonrpc_error(msg_id, -32004, "BLAST retrieval request not found")
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval request not found")
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}], "isError": False},
@@ -1028,8 +1028,9 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             return _jsonrpc_result(msg_id, None)
 
         return _jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
-    except Exception as exc:
-        return _jsonrpc_error(msg_id, -32603, str(exc))
+    except Exception:
+        logger.exception("Unhandled MCP JSON-RPC error")
+        return _jsonrpc_error(msg_id, -32603, "Internal server error")
 
 @app.get("/mcp/v1/resources")
 async def list_resources() -> Dict[str, List[ResourceInfo]]:

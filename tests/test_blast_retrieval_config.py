@@ -11,6 +11,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
+SERVER_MODULE = importlib.import_module("server")
 
 from retrieval_provider import parse_submission_response
 from retrieval_service import BlastRetrievalService
@@ -73,8 +74,8 @@ def _mock_blast_handler():
     return handler, request_counts
 
 
-def _configure_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
-    server = importlib.import_module("server")
+def _configure_and_reset_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
+    server = SERVER_MODULE
     retrieval = server.config_manager.get().retrieval
     retrieval.feature_flags.enabled = True
     retrieval.feature_flags.expose_rest = True
@@ -344,7 +345,7 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
 
 def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
     handler, request_counts = _mock_blast_handler()
-    server = _configure_server_for_retrieval(tmp_path, handler)
+    server = _configure_and_reset_server_for_retrieval(tmp_path, handler)
 
     async def exercise_server() -> None:
         transport = httpx.ASGITransport(app=server.app)
