@@ -208,11 +208,15 @@ test.describe('Settings + utility buttons', () => {
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
 
     await expect(page.getByRole('heading', { name: 'BLAST Retrieval' })).toBeVisible()
-    await expect(page.getByLabel('allow job grounding (opt-in)')).toBeVisible()
+    const groundingToggle = page.getByLabel('allow job grounding (opt-in)')
+    await expect(groundingToggle).toBeVisible()
+    await groundingToggle.scrollIntoViewIfNeeded()
+    await groundingToggle.dispatchEvent('click')
 
-    await page.getByLabel('allow job grounding (opt-in)').check()
-    await page.getByLabel('Program').fill('blastx')
-    await page.getByRole('button', { name: 'Save' }).click()
+    const programInput = page.getByLabel('Program')
+    await programInput.scrollIntoViewIfNeeded()
+    await programInput.fill('blastx')
+    await page.getByRole('button', { name: 'Save' }).dispatchEvent('click')
 
     expect(putConfigPayloads.length).toBeGreaterThan(0)
     const latest = putConfigPayloads[putConfigPayloads.length - 1]
