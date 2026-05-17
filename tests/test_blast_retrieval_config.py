@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import asyncio
+import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -16,6 +18,86 @@ from retrieval_store import RetrievalStore
 from runtime_config import MCPServerConfig, RuntimeConfigManager
 
 TEST_FASTA_QUERY = ">query\nACDEFGHIKL\n"
+MOCK_BLAST_XML = """<?xml version="1.0"?>
+<BlastOutput>
+  <BlastOutput_iterations>
+    <Iteration>
+      <Iteration_hits>
+        <Hit>
+          <Hit_def>Example protein [Testus organismus]</Hit_def>
+          <Hit_accession>ABC123</Hit_accession>
+          <Hit_len>100</Hit_len>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_bit-score>55.0</Hsp_bit-score>
+              <Hsp_evalue>1e-20</Hsp_evalue>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>10</Hsp_query-to>
+              <Hsp_hit-from>5</Hsp_hit-from>
+              <Hsp_hit-to>14</Hsp_hit-to>
+              <Hsp_identity>8</Hsp_identity>
+              <Hsp_positive>9</Hsp_positive>
+              <Hsp_align-len>10</Hsp_align-len>
+              <Hsp_gaps>0</Hsp_gaps>
+              <Hsp_qseq>ACDEFGHIKL</Hsp_qseq>
+              <Hsp_hseq>ACDEYGHIKL</Hsp_hseq>
+              <Hsp_midline>|||| |||||</Hsp_midline>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+      </Iteration_hits>
+    </Iteration>
+  </BlastOutput_iterations>
+</BlastOutput>
+"""
+
+
+def _mock_blast_handler():
+    request_counts = {"submit": 0, "search_info": 0, "result": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.method == "POST":
+            request_counts["submit"] += 1
+            return httpx.Response(200, text="RID = TEST123\nRTOE = 0\n")
+        if params.get("FORMAT_OBJECT") == "SearchInfo":
+            request_counts["search_info"] += 1
+            if request_counts["search_info"] == 1:
+                return httpx.Response(200, text="Status=WAITING\n")
+            return httpx.Response(200, text="Status=READY\nThereAreHits=yes\n")
+        if params.get("FORMAT_TYPE") == "XML":
+            request_counts["result"] += 1
+            return httpx.Response(200, text=MOCK_BLAST_XML)
+        return httpx.Response(400, text="unexpected request")
+
+    return handler, request_counts
+
+
+def _configure_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
+    server = importlib.import_module("server")
+    retrieval = server.config_manager.get().retrieval
+    retrieval.feature_flags.enabled = True
+    retrieval.feature_flags.expose_rest = True
+    retrieval.feature_flags.expose_mcp = True
+    retrieval.feature_flags.evidence_enrichment = evidence_enrichment
+    retrieval.feature_flags.export_parquet = False
+    retrieval.feature_flags.create_schema_on_startup = True
+    retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+    retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
+    retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
+    retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
+
+    store = RetrievalStore(retrieval)
+    server.app.state.retrieval_store = store
+    server.app.state.retrieval_service = BlastRetrievalService(
+        config=retrieval,
+        store=store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+    server.jobs_db.clear()
+    return server
 
 
 def test_retrieval_defaults_follow_blast_scaffolding(tmp_path, monkeypatch):
@@ -125,54 +207,7 @@ def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
     cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
     cfg.retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
 
-    request_counts = {"submit": 0, "search_info": 0, "result": 0}
-    xml_payload = """<?xml version="1.0"?>
-<BlastOutput>
-  <BlastOutput_iterations>
-    <Iteration>
-      <Iteration_hits>
-        <Hit>
-          <Hit_def>Example protein [Testus organismus]</Hit_def>
-          <Hit_accession>ABC123</Hit_accession>
-          <Hit_len>100</Hit_len>
-          <Hit_hsps>
-            <Hsp>
-              <Hsp_bit-score>55.0</Hsp_bit-score>
-              <Hsp_evalue>1e-20</Hsp_evalue>
-              <Hsp_query-from>1</Hsp_query-from>
-              <Hsp_query-to>10</Hsp_query-to>
-              <Hsp_hit-from>5</Hsp_hit-from>
-              <Hsp_hit-to>14</Hsp_hit-to>
-              <Hsp_identity>8</Hsp_identity>
-              <Hsp_positive>9</Hsp_positive>
-              <Hsp_align-len>10</Hsp_align-len>
-              <Hsp_gaps>0</Hsp_gaps>
-              <Hsp_qseq>ACDEFGHIKL</Hsp_qseq>
-              <Hsp_hseq>ACDEYGHIKL</Hsp_hseq>
-              <Hsp_midline>|||| |||||</Hsp_midline>
-            </Hsp>
-          </Hit_hsps>
-        </Hit>
-      </Iteration_hits>
-    </Iteration>
-  </BlastOutput_iterations>
-</BlastOutput>
-"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        params = dict(request.url.params)
-        if request.method == "POST":
-            request_counts["submit"] += 1
-            return httpx.Response(200, text="RID = TEST123\nRTOE = 0\n")
-        if params.get("FORMAT_OBJECT") == "SearchInfo":
-            request_counts["search_info"] += 1
-            if request_counts["search_info"] == 1:
-                return httpx.Response(200, text="Status=WAITING\n")
-            return httpx.Response(200, text="Status=READY\nThereAreHits=yes\n")
-        if params.get("FORMAT_TYPE") == "XML":
-            request_counts["result"] += 1
-            return httpx.Response(200, text=xml_payload)
-        return httpx.Response(400, text="unexpected request")
+    handler, request_counts = _mock_blast_handler()
 
     store = RetrievalStore(cfg.retrieval)
     service = BlastRetrievalService(
@@ -235,39 +270,6 @@ def test_remote_retrieval_service_exports_parquet_without_evidence_documents(tmp
     cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
     cfg.retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
 
-    xml_payload = """<?xml version="1.0"?>
-<BlastOutput>
-  <BlastOutput_iterations>
-    <Iteration>
-      <Iteration_hits>
-        <Hit>
-          <Hit_def>Example protein [Testus organismus]</Hit_def>
-          <Hit_accession>ABC123</Hit_accession>
-          <Hit_len>100</Hit_len>
-          <Hit_hsps>
-            <Hsp>
-              <Hsp_bit-score>55.0</Hsp_bit-score>
-              <Hsp_evalue>1e-20</Hsp_evalue>
-              <Hsp_query-from>1</Hsp_query-from>
-              <Hsp_query-to>10</Hsp_query-to>
-              <Hsp_hit-from>5</Hsp_hit-from>
-              <Hsp_hit-to>14</Hsp_hit-to>
-              <Hsp_identity>8</Hsp_identity>
-              <Hsp_positive>9</Hsp_positive>
-              <Hsp_align-len>10</Hsp_align-len>
-              <Hsp_gaps>0</Hsp_gaps>
-              <Hsp_qseq>ACDEFGHIKL</Hsp_qseq>
-              <Hsp_hseq>ACDEYGHIKL</Hsp_hseq>
-              <Hsp_midline>|||| |||||</Hsp_midline>
-            </Hsp>
-          </Hit_hsps>
-        </Hit>
-      </Iteration_hits>
-    </Iteration>
-  </BlastOutput_iterations>
-</BlastOutput>
-"""
-
     def handler(request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
         if request.method == "POST":
@@ -275,7 +277,7 @@ def test_remote_retrieval_service_exports_parquet_without_evidence_documents(tmp
         if params.get("FORMAT_OBJECT") == "SearchInfo":
             return httpx.Response(200, text="Status=READY\nThereAreHits=yes\n")
         if params.get("FORMAT_TYPE") == "XML":
-            return httpx.Response(200, text=xml_payload)
+            return httpx.Response(200, text=MOCK_BLAST_XML)
         return httpx.Response(400, text="unexpected request")
 
     store = RetrievalStore(cfg.retrieval)
@@ -338,6 +340,84 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
     assert result.status == "failed"
     assert result.cached is False
     assert "failed" in str(result.result.get("error_text", "")).lower()
+
+
+def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
+    handler, request_counts = _mock_blast_handler()
+    server = _configure_server_for_retrieval(tmp_path, handler)
+
+    async def exercise_server() -> None:
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            tools_response = await client.get("/mcp/v1/tools")
+            assert tools_response.status_code == 200
+            tool_names = {tool["name"] for tool in tools_response.json()["tools"]}
+            assert {"start_blast_retrieval", "get_blast_retrieval"} <= tool_names
+
+            create_response = await client.post(
+                "/api/retrieval/requests",
+                json={"sequence": TEST_FASTA_QUERY, "hitlist_size": 10},
+            )
+            assert create_response.status_code == 200
+            created = create_response.json()
+            assert created["status"] == "completed"
+            assert created["cached"] is False
+            assert created["hit_count"] == 1
+            assert created["result"]["evidence_packet"]["document_count"] == 1
+
+            request_id = created["request_id"]
+            fetch_response = await client.get(f"/api/retrieval/requests/{request_id}")
+            assert fetch_response.status_code == 200
+            fetched = fetch_response.json()
+            assert fetched["request_id"] == request_id
+            assert fetched["evidence_packet"]["documents"][0]["source_id"] == "ABC123"
+
+            cache_response = await client.get("/api/retrieval/cache")
+            assert cache_response.status_code == 200
+            entries = cache_response.json()["entries"]
+            assert len(entries) == 1
+            assert entries[0]["request_id"] == request_id
+            assert entries[0]["status"] == "completed"
+            assert entries[0]["evidence_count"] == 1
+
+            start_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "start_blast_retrieval",
+                        "arguments": {"sequence": TEST_FASTA_QUERY, "hitlist_size": 10},
+                    },
+                },
+            )
+            assert start_tool_response.status_code == 200
+            start_tool_result = start_tool_response.json()["result"]
+            start_tool_payload = json.loads(start_tool_result["content"][0]["text"])
+            assert start_tool_payload["request_id"] == request_id
+            assert start_tool_payload["cached"] is True
+
+            get_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "get_blast_retrieval",
+                        "arguments": {"request_id": request_id},
+                    },
+                },
+            )
+            assert get_tool_response.status_code == 200
+            get_tool_result = get_tool_response.json()["result"]
+            get_tool_payload = json.loads(get_tool_result["content"][0]["text"])
+            assert get_tool_payload["request_id"] == request_id
+            assert get_tool_payload["evidence_packet"]["document_count"] == 1
+
+    asyncio.run(exercise_server())
+    assert request_counts == {"submit": 1, "search_info": 2, "result": 1}
 
 
 def test_retrieval_store_skips_schema_when_startup_bootstrap_disabled(tmp_path):

@@ -206,6 +206,15 @@ class BlastRetrievalService:
                 result=result,
             )
 
+    def get_request_result(self, request_id: str) -> Optional[Dict[str, Any]]:
+        result = self._store.get_request_result(request_id)
+        if not result:
+            return None
+        return self._with_evidence_packet(result)
+
+    def list_cached_requests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
+        return self._store.list_cached_requests(limit=limit)
+
     def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
         evidence_documents = list(result.get("evidence_documents") or [])
         packet_documents = []

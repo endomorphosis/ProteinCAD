@@ -26,22 +26,22 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 2 in progress
+- **Status**: Milestone 3 in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 2 — evidence enrichment
-- **Next in-progress task**: expose retrieval evidence through MCP/REST endpoints
+- **Current milestone**: Milestone 3 — MCP server exposure
+- **Next in-progress task**: add MCP resources for cached evidence bundles
 - **Primary edit targets**:
   - `mcp-server/server.py`
-  - `mcp-server/retrieval_service.py`
   - `mcp-server/retrieval_store.py`
   - `tests/test_blast_retrieval_config.py`
+  - `docs/BLAST_RAG_TODO.md`
 - **Open decisions blocking deeper implementation**:
   - whether BLAST grounding is opt-in or enabled by default for design jobs
 - **Recommended first implementation slice**:
-  1. expose retrieval evidence through MCP/REST endpoints
-  2. add endpoint/tool tests around evidence packets
-  3. decide whether BLAST grounding stays opt-in when MCP endpoints ship
-  4. add MCP resources for cached evidence bundles
+  1. add MCP resources for cached evidence bundles
+  2. decide whether BLAST grounding stays opt-in when MCP endpoints ship
+  3. add dashboard retrieval settings/evidence rendering
+  4. add MCP resource tests around evidence packets and parquet manifests
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -122,13 +122,13 @@ Goal: turn BLAST hits into promptable evidence with provenance.
 
 Goal: make retrieval usable without the dashboard first.
 
-- [ ] Add REST endpoint to submit retrieval requests
-- [ ] Add REST endpoint to poll retrieval status/results
-- [ ] Add REST endpoint to list cached retrieval entries
-- [ ] Add MCP tool to start BLAST retrieval
-- [ ] Add MCP tool to fetch retrieval summary/evidence
+- [x] Add REST endpoint to submit retrieval requests
+- [x] Add REST endpoint to poll retrieval status/results
+- [x] Add REST endpoint to list cached retrieval entries
+- [x] Add MCP tool to start BLAST retrieval
+- [x] Add MCP tool to fetch retrieval summary/evidence
 - [ ] Add MCP resource(s) for cached evidence bundles
-- [ ] Add tests for MCP and REST retrieval flows using mocked BLAST responses
+- [x] Add tests for MCP and REST retrieval flows using mocked BLAST responses
 
 ### Exit criteria
 
@@ -176,8 +176,8 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 If a new session needs an unambiguous place to start, work top-down through this list:
 
-1. [ ] Add MCP-only retrieval endpoints/tools before dashboard UI
-2. [ ] Add tests for MCP and REST retrieval flows using mocked BLAST responses
+1. [ ] Add MCP resource(s) for cached evidence bundles
+2. [ ] Decide whether BLAST grounding stays opt-in when MCP endpoints ship
 3. [ ] Add dashboard retrieval settings/evidence rendering
 4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
 5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
@@ -188,13 +188,12 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: add optional Parquet export for enriched retrieval batches — gated by `MCP_RETRIEVAL_EXPORT_PARQUET`, with per-request Parquet bundles plus persisted dataset manifests linked back to evidence documents
-- **Next recommended task**: expose retrieval evidence through MCP/REST endpoints
+- **Last completed task**: expose retrieval evidence through MCP/REST endpoints — add REST submit/status/cache routes, MCP tools for start/fetch, and mocked endpoint tests around evidence packets
+- **Next recommended task**: add MCP resources for cached evidence bundles
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-server/server.py`
   - `mcp-server/retrieval_store.py`
-  - `mcp-server/retrieval_service.py`
   - `tests/test_blast_retrieval_config.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:

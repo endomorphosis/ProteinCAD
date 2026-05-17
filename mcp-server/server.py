@@ -13,6 +13,7 @@ import os
 import json
 import asyncio
 import contextlib
+from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
@@ -152,6 +153,29 @@ async def _refresh_retrieval_store() -> None:
     retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
     if retrieval_error:
         logger.warning("BLAST retrieval initialization failed after config refresh: %s", retrieval_error)
+
+
+def _retrieval_runtime_config():
+    return config_manager.get().retrieval
+
+
+def _ensure_retrieval_rest_enabled():
+    cfg = _retrieval_runtime_config()
+    if not cfg.feature_flags.enabled or not cfg.feature_flags.expose_rest:
+        raise HTTPException(status_code=404, detail="BLAST retrieval REST endpoints are disabled")
+    return cfg
+
+
+def _ensure_retrieval_mcp_enabled() -> None:
+    cfg = _retrieval_runtime_config()
+    if not cfg.feature_flags.enabled or not cfg.feature_flags.expose_mcp:
+        raise RuntimeError("BLAST retrieval MCP tools are disabled")
+
+
+def _serialize_retrieval_result(result: Any) -> Dict[str, Any]:
+    if hasattr(result, "__dataclass_fields__"):
+        return asdict(result)
+    return dict(result)
 
 
 @app.get("/api/config")
@@ -326,6 +350,13 @@ class ProteinSequenceInput(BaseModel):
     job_name: Optional[str] = Field(None, description="Optional name for the job")
     num_designs: int = Field(5, description="Number of binder designs to generate")
 
+
+class RetrievalRequestInput(BaseModel):
+    sequence: str = Field(..., description="Protein amino acid sequence or FASTA query")
+    program: Optional[str] = Field(None, description="Optional BLAST program override")
+    database: Optional[str] = Field(None, description="Optional BLAST database override")
+    hitlist_size: Optional[int] = Field(None, description="Optional BLAST hitlist size override")
+
 # AlphaFold optimization settings
 class AlphaFoldOptimizationSettings(BaseModel):
     speed_preset: Optional[str] = Field(
@@ -405,14 +436,13 @@ class ResourceInfo(BaseModel):
 @app.get("/mcp/v1/tools")
 async def list_tools() -> Dict[str, List[ToolInfo]]:
     """List available MCP tools"""
-    return {
-        "tools": [
-            ToolInfo(
+    tools = [
+        ToolInfo(
                 name="get_runtime_config",
                 description="Get the MCP server runtime routing/provider config",
                 inputSchema={"type": "object", "properties": {}},
             ),
-            ToolInfo(
+        ToolInfo(
                 name="update_runtime_config",
                 description="Update the MCP server runtime config (deep-merged and persisted when enabled)",
                 inputSchema={
@@ -425,12 +455,12 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     },
                 },
             ),
-            ToolInfo(
+        ToolInfo(
                 name="reset_runtime_config",
                 description="Reset the MCP server runtime config to defaults",
                 inputSchema={"type": "object", "properties": {}},
             ),
-            ToolInfo(
+        ToolInfo(
                 name="embedded_bootstrap",
                 description="Trigger best-effort embedded asset bootstrap/download into /models",
                 inputSchema={
@@ -444,7 +474,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     },
                 },
             ),
-            ToolInfo(
+        ToolInfo(
                 name="design_protein_binder",
                 description="Design protein binders for a target sequence",
                 inputSchema={
@@ -467,7 +497,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["sequence"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="get_job_status",
                 description="Get the status of a protein design job",
                 inputSchema={
@@ -481,7 +511,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["job_id"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="list_jobs",
                 description="List all protein design jobs",
                 inputSchema={
@@ -489,7 +519,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "properties": {}
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="delete_job",
                 description="Delete a protein design job",
                 inputSchema={
@@ -503,7 +533,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["job_id"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="check_services",
                 description="Check status of all backend services (NIM/native/hybrid)",
                 inputSchema={
@@ -511,7 +541,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "properties": {}
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="predict_structure",
                 description="Predict structure from sequence (AlphaFold2 backend)",
                 inputSchema={
@@ -525,7 +555,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["sequence"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="design_binder_backbone",
                 description="Generate binder backbones from a target PDB (RFDiffusion backend)",
                 inputSchema={
@@ -544,7 +574,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["target_pdb"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="generate_sequence",
                 description="Generate binder sequence from a backbone PDB (ProteinMPNN backend)",
                 inputSchema={
@@ -558,7 +588,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["backbone_pdb"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="predict_complex",
                 description="Predict complex structure from sequences (AlphaFold2-Multimer backend)",
                 inputSchema={
@@ -573,7 +603,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "required": ["sequences"]
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="get_alphafold_settings",
                 description="Get current AlphaFold optimization settings",
                 inputSchema={
@@ -581,7 +611,7 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     "properties": {}
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="update_alphafold_settings",
                 description="Update AlphaFold optimization settings (speed_preset, disable_templates, num_recycles, etc.)",
                 inputSchema={
@@ -614,16 +644,47 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                     }
                 }
             ),
-            ToolInfo(
+        ToolInfo(
                 name="reset_alphafold_settings",
                 description="Reset AlphaFold optimization settings to defaults",
                 inputSchema={
                     "type": "object",
                     "properties": {}
                 }
-            )
-        ]
-    }
+            ),
+    ]
+    retrieval_cfg = _retrieval_runtime_config()
+    if retrieval_cfg.feature_flags.enabled and retrieval_cfg.feature_flags.expose_mcp:
+        tools.extend(
+            [
+                ToolInfo(
+                    name="start_blast_retrieval",
+                    description="Run BLAST retrieval for a sequence and return normalized evidence results",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "sequence": {"type": "string", "description": "Protein amino acid sequence or FASTA query"},
+                            "program": {"type": "string", "description": "Optional BLAST program override"},
+                            "database": {"type": "string", "description": "Optional BLAST database override"},
+                            "hitlist_size": {"type": "integer", "description": "Optional BLAST hitlist size override"},
+                        },
+                        "required": ["sequence"],
+                    },
+                ),
+                ToolInfo(
+                    name="get_blast_retrieval",
+                    description="Fetch a normalized BLAST retrieval result by request id",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "request_id": {"type": "string", "description": "Retrieval request id to read"},
+                        },
+                        "required": ["request_id"],
+                    },
+                ),
+            ]
+        )
+    return {"tools": tools}
 
 
 def _jsonrpc_error(_id: Any, code: int, message: str) -> Dict[str, Any]:
@@ -735,6 +796,44 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(payload, indent=2)}], "isError": False},
+                )
+
+            if name == "start_blast_retrieval":
+                try:
+                    _ensure_retrieval_mcp_enabled()
+                except RuntimeError as exc:
+                    return _jsonrpc_error(msg_id, -32000, str(exc))
+                sequence = arguments.get("sequence")
+                if not sequence:
+                    return _jsonrpc_error(msg_id, -32602, "Missing sequence")
+                result = await app.state.retrieval_service.retrieve(
+                    sequence,
+                    program=arguments.get("program"),
+                    database=arguments.get("database"),
+                    hitlist_size=arguments.get("hitlist_size"),
+                )
+                return _jsonrpc_result(
+                    msg_id,
+                    {
+                        "content": [{"type": "text", "text": json.dumps(_serialize_retrieval_result(result), indent=2, default=str)}],
+                        "isError": False,
+                    },
+                )
+
+            if name == "get_blast_retrieval":
+                try:
+                    _ensure_retrieval_mcp_enabled()
+                except RuntimeError as exc:
+                    return _jsonrpc_error(msg_id, -32000, str(exc))
+                request_id = arguments.get("request_id")
+                if not request_id:
+                    return _jsonrpc_error(msg_id, -32602, "Missing request_id")
+                result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
+                if not result:
+                    return _jsonrpc_error(msg_id, -32004, "BLAST retrieval request not found")
+                return _jsonrpc_result(
+                    msg_id,
+                    {"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}], "isError": False},
                 )
 
             if name == "design_protein_binder":
@@ -965,6 +1064,38 @@ async def get_resource(job_id: str) -> Dict[str, Any]:
             }
         ]
     }
+
+
+@app.post("/api/retrieval/requests")
+async def create_retrieval_request(input_data: RetrievalRequestInput) -> Dict[str, Any]:
+    """Submit a BLAST retrieval request and return the normalized evidence result."""
+    _ensure_retrieval_rest_enabled()
+    result = await app.state.retrieval_service.retrieve(
+        input_data.sequence,
+        program=input_data.program,
+        database=input_data.database,
+        hitlist_size=input_data.hitlist_size,
+    )
+    return _serialize_retrieval_result(result)
+
+
+@app.get("/api/retrieval/requests/{request_id}")
+async def get_retrieval_request(request_id: str) -> Dict[str, Any]:
+    """Poll a BLAST retrieval request/result by request id."""
+    _ensure_retrieval_rest_enabled()
+    result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
+    return result
+
+
+@app.get("/api/retrieval/cache")
+async def list_retrieval_cache(limit: int = 100) -> Dict[str, Any]:
+    """List cached BLAST retrieval entries."""
+    _ensure_retrieval_rest_enabled()
+    entries = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=max(1, limit))
+    return {"entries": entries}
+
 
 # Job management endpoints
 @app.post("/api/jobs", response_model=JobStatus, response_model_exclude_unset=True)

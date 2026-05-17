@@ -27,7 +27,8 @@ The recommended rollout is incremental:
 - Milestone 2 now has a first enrichment slice: normalized annotation records, accession/title/organism enrichment, evidence documents with provenance fields, and short evidence packets are produced from cached BLAST hits.
 - The `ipfs_datasets_py` boundary is now defined: BLAST query-time retrieval, caching, normalization, and evidence packets stay in the MCP server; only non-BLAST scraping, heterogeneous ETL, Parquet packaging, and optional IPFS publication should cross into `ipfs_datasets_py`.
 - Milestone 2 now also supports optional DuckDB-backed Parquet bundle export plus dataset manifest persistence for enriched retrieval batches.
-- Remaining work is focused on exposing retrieval evidence through MCP/REST and dashboard UX.
+- Milestone 3 now has its first server exposure slice: REST submit/status/cache endpoints and MCP tools can return normalized BLAST retrieval evidence from the MCP server.
+- Remaining work is focused on MCP resources for cached evidence bundles, the grounding opt-in decision, and dashboard UX.
 
 ---
 

@@ -867,6 +867,62 @@ class RetrievalStore:
                     "dataset_manifests": dataset_manifests,
                 }
 
+    def list_cached_requests(self, *, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return []
+            with self._connect(read_only=True) as conn:
+                cur = conn.execute(
+                    """
+                    SELECT
+                        c.cache_key,
+                        c.request_id,
+                        c.provider,
+                        c.hit_count,
+                        c.storage_path,
+                        c.created_at,
+                        c.expires_at,
+                        r.status,
+                        r.requested_at,
+                        (
+                            SELECT COUNT(*)
+                            FROM protein_annotations a
+                            WHERE a.request_id = c.request_id
+                        ) AS annotation_count,
+                        (
+                            SELECT COUNT(*)
+                            FROM evidence_documents e
+                            WHERE e.request_id = c.request_id
+                        ) AS evidence_count,
+                        (
+                            SELECT COUNT(*)
+                            FROM dataset_manifests m
+                            WHERE m.request_id = c.request_id
+                        ) AS manifest_count,
+                        (
+                            SELECT run_id
+                            FROM retrieval_runs rr
+                            WHERE rr.request_id = c.request_id
+                            ORDER BY submitted_at DESC
+                            LIMIT 1
+                        ) AS latest_run_id,
+                        (
+                            SELECT completed_at
+                            FROM retrieval_runs rr
+                            WHERE rr.request_id = c.request_id
+                            ORDER BY submitted_at DESC
+                            LIMIT 1
+                        ) AS latest_completed_at
+                    FROM retrieval_cache_entries c
+                    INNER JOIN retrieval_requests r ON r.request_id = c.request_id
+                    ORDER BY c.created_at DESC
+                    LIMIT ?
+                    """,
+                    [max(1, limit)],
+                )
+                columns = [desc[0] for desc in cur.description]
+                return [self._row_to_dict(columns, row) for row in cur.fetchall()]
+
     def schema_tables(self) -> set[str]:
         with self._lock:
             if not self._duckdb_path().exists():
