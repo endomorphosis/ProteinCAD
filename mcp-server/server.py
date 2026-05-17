@@ -181,6 +181,27 @@ def _serialize_retrieval_result(result: Any) -> Dict[str, Any]:
     raise TypeError(f"Unsupported retrieval result payload type: {type(result).__name__}")
 
 
+def _retrieval_mcp_enabled() -> bool:
+    cfg = _retrieval_runtime_config()
+    return bool(cfg.feature_flags.enabled and cfg.feature_flags.expose_mcp)
+
+
+def _parse_resource_identifier(resource_id: str) -> tuple[str, str]:
+    if resource_id.startswith("job://"):
+        return ("job", resource_id.replace("job://", "", 1))
+    if resource_id.startswith("retrieval://"):
+        return ("retrieval", resource_id.replace("retrieval://", "", 1))
+    if resource_id.startswith("retrieval-manifest://"):
+        return ("retrieval_manifest", resource_id.replace("retrieval-manifest://", "", 1))
+    if resource_id in jobs_db:
+        return ("job", resource_id)
+    if resource_id.startswith("retrieval_"):
+        return ("retrieval", resource_id)
+    if resource_id.endswith("_parquet"):
+        return ("retrieval_manifest", resource_id)
+    return ("job", resource_id)
+
+
 @app.get("/api/config")
 async def get_runtime_config() -> Dict[str, Any]:
     """Get MCP server runtime config (used by the dashboard settings UI)."""
@@ -1020,11 +1041,7 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             uri = params.get("uri") or params.get("path")
             if not uri:
                 return _jsonrpc_error(msg_id, -32602, "Missing resource uri")
-            if uri.startswith("job://"):
-                job_id = uri.replace("job://", "")
-            else:
-                job_id = uri
-            contents = (await get_resource(job_id)).get("contents", [])
+            contents = (await get_resource(uri)).get("contents", [])
             return _jsonrpc_result(msg_id, {"contents": contents})
 
         if method in {"shutdown", "exit"}:
@@ -1053,22 +1070,83 @@ async def list_resources() -> Dict[str, List[ResourceInfo]]:
                 description=f"Results for protein design job {job_id}",
                 mimeType="application/json"
             ))
+    if _retrieval_mcp_enabled():
+        cached_requests = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=100)
+        for entry in cached_requests:
+            request_id = entry.get("request_id")
+            if not request_id:
+                continue
+            resources.append(ResourceInfo(
+                uri=f"retrieval://{request_id}",
+                name=f"blast-retrieval-{request_id}",
+                description=f"Cached BLAST evidence bundle for retrieval request {request_id}",
+                mimeType="application/json",
+            ))
+        dataset_manifests = await asyncio.to_thread(app.state.retrieval_service.list_dataset_manifests, limit=100)
+        for manifest in dataset_manifests:
+            manifest_id = manifest.get("manifest_id")
+            request_id = manifest.get("request_id")
+            if not manifest_id:
+                continue
+            description = f"Parquet manifest for BLAST retrieval bundle {manifest_id}"
+            if request_id:
+                description += f" (request {request_id})"
+            resources.append(ResourceInfo(
+                uri=f"retrieval-manifest://{manifest_id}",
+                name=f"blast-retrieval-manifest-{manifest_id}",
+                description=description,
+                mimeType="application/json",
+            ))
     return {"resources": resources}
 
-@app.get("/mcp/v1/resources/{job_id}")
-async def get_resource(job_id: str) -> Dict[str, Any]:
+@app.get("/mcp/v1/resources/{resource_id:path}")
+async def get_resource(resource_id: str) -> Dict[str, Any]:
     """Get a specific resource"""
-    if job_id not in jobs_db:
+    resource_kind, identifier = _parse_resource_identifier(resource_id)
+
+    if resource_kind == "retrieval":
+        if not _retrieval_mcp_enabled():
+            raise HTTPException(status_code=404, detail="BLAST retrieval MCP resources are disabled")
+        result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, identifier)
+        if not result:
+            raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
+        return {
+            "contents": [
+                {
+                    "uri": f"retrieval://{identifier}",
+                    "mimeType": "application/json",
+                    "text": json.dumps(result, indent=2, default=str),
+                }
+            ]
+        }
+
+    if resource_kind == "retrieval_manifest":
+        if not _retrieval_mcp_enabled():
+            raise HTTPException(status_code=404, detail="BLAST retrieval MCP resources are disabled")
+        manifest = await asyncio.to_thread(app.state.retrieval_service.get_dataset_manifest, identifier)
+        if not manifest:
+            raise HTTPException(status_code=404, detail="BLAST retrieval manifest not found")
+        return {
+            "contents": [
+                {
+                    "uri": f"retrieval-manifest://{identifier}",
+                    "mimeType": "application/json",
+                    "text": json.dumps(manifest, indent=2, default=str),
+                }
+            ]
+        }
+
+    if identifier not in jobs_db:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = jobs_db[job_id]
+
+    job = jobs_db[identifier]
     if not job.get("results"):
         raise HTTPException(status_code=404, detail="Job results not available yet")
-    
+
     return {
         "contents": [
             {
-                "uri": f"job://{job_id}",
+                "uri": f"job://{identifier}",
                 "mimeType": "application/json",
                 "text": json.dumps(job["results"], indent=2)
             }

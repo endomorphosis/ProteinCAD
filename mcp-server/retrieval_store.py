@@ -923,6 +923,51 @@ class RetrievalStore:
                 columns = [desc[0] for desc in cur.description]
                 return [self._row_to_dict(columns, row) for row in cur.fetchall()]
 
+    def get_dataset_manifest(self, manifest_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return None
+            with self._connect(read_only=True) as conn:
+                cur = conn.execute(
+                    """
+                    SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
+                           raw_payload_dir, manifest_json, created_at
+                    FROM dataset_manifests
+                    WHERE manifest_id = ?
+                    """,
+                    [manifest_id],
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                columns = [desc[0] for desc in cur.description]
+                manifest = self._row_to_dict(columns, row)
+                if isinstance(manifest.get("manifest_json"), str):
+                    manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
+                return manifest
+
+    def list_dataset_manifests(self, *, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return []
+            with self._connect(read_only=True) as conn:
+                cur = conn.execute(
+                    """
+                    SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
+                           raw_payload_dir, manifest_json, created_at
+                    FROM dataset_manifests
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    [max(1, limit)],
+                )
+                columns = [desc[0] for desc in cur.description]
+                manifests = [self._row_to_dict(columns, row) for row in cur.fetchall()]
+                for manifest in manifests:
+                    if isinstance(manifest.get("manifest_json"), str):
+                        manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
+                return manifests
+
     def schema_tables(self) -> set[str]:
         with self._lock:
             if not self._duckdb_path().exists():

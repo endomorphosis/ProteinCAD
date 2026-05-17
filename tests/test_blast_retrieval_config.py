@@ -75,14 +75,20 @@ def _mock_blast_handler() -> Tuple[Callable[[httpx.Request], httpx.Response], Di
     return handler, request_counts
 
 
-def _configure_and_reset_server_for_retrieval(tmp_path, handler, *, evidence_enrichment=True):
+def _configure_and_reset_server_for_retrieval(
+    tmp_path,
+    handler,
+    *,
+    evidence_enrichment=True,
+    export_parquet=False,
+):
     server = mcp_server_module
     retrieval = server.config_manager.get().retrieval
     retrieval.feature_flags.enabled = True
     retrieval.feature_flags.expose_rest = True
     retrieval.feature_flags.expose_mcp = True
     retrieval.feature_flags.evidence_enrichment = evidence_enrichment
-    retrieval.feature_flags.export_parquet = False
+    retrieval.feature_flags.export_parquet = export_parquet
     retrieval.feature_flags.create_schema_on_startup = True
     retrieval.storage.data_dir = str(tmp_path / "retrieval")
     retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
@@ -346,7 +352,7 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
 
 def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
     handler, request_counts = _mock_blast_handler()
-    server = _configure_and_reset_server_for_retrieval(tmp_path, handler)
+    server = _configure_and_reset_server_for_retrieval(tmp_path, handler, export_parquet=True)
 
     async def exercise_server() -> None:
         transport = httpx.ASGITransport(app=server.app)
@@ -366,6 +372,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert created["cached"] is False
             assert created["hit_count"] == 1
             assert created["result"]["evidence_packet"]["document_count"] == 1
+            manifest_id = created["result"]["dataset_manifests"][0]["manifest_id"]
 
             request_id = created["request_id"]
             fetch_response = await client.get(f"/api/retrieval/requests/{request_id}")
@@ -381,6 +388,12 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert entries[0]["request_id"] == request_id
             assert entries[0]["status"] == "completed"
             assert entries[0]["evidence_count"] == 1
+
+            resources_response = await client.get("/mcp/v1/resources")
+            assert resources_response.status_code == 200
+            resource_uris = {resource["uri"] for resource in resources_response.json()["resources"]}
+            assert f"retrieval://{request_id}" in resource_uris
+            assert f"retrieval-manifest://{manifest_id}" in resource_uris
 
             start_tool_response = await client.post(
                 "/mcp",
@@ -417,6 +430,37 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             get_tool_payload = json.loads(get_tool_result["content"][0]["text"])
             assert get_tool_payload["request_id"] == request_id
             assert get_tool_payload["evidence_packet"]["document_count"] == 1
+
+            resource_read_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "resources/read",
+                    "params": {"uri": f"retrieval://{request_id}"},
+                },
+            )
+            assert resource_read_response.status_code == 200
+            resource_contents = resource_read_response.json()["result"]["contents"]
+            resource_payload = json.loads(resource_contents[0]["text"])
+            assert resource_payload["request_id"] == request_id
+            assert resource_payload["evidence_packet"]["document_count"] == 1
+
+            manifest_read_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "resources/read",
+                    "params": {"uri": f"retrieval-manifest://{manifest_id}"},
+                },
+            )
+            assert manifest_read_response.status_code == 200
+            manifest_contents = manifest_read_response.json()["result"]["contents"]
+            manifest_payload = json.loads(manifest_contents[0]["text"])
+            assert manifest_payload["manifest_id"] == manifest_id
+            assert manifest_payload["request_id"] == request_id
+            assert Path(manifest_payload["manifest"]["parquet_files"]["hits"]).is_file() is True
 
     asyncio.run(exercise_server())
     assert request_counts == {"submit": 1, "search_info": 2, "result": 1}

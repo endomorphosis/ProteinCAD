@@ -215,6 +215,12 @@ class BlastRetrievalService:
     def list_cached_requests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
         return self._store.list_cached_requests(limit=limit)
 
+    def get_dataset_manifest(self, manifest_id: str) -> Optional[Dict[str, Any]]:
+        return self._store.get_dataset_manifest(manifest_id)
+
+    def list_dataset_manifests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
+        return self._store.list_dataset_manifests(limit=limit)
+
     def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
         evidence_documents = list(result.get("evidence_documents") or [])
         packet_documents = []
