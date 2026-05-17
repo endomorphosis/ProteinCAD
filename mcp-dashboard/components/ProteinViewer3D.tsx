@@ -4072,7 +4072,7 @@ export default function ProteinViewer3D({
                     {variantsRunning ? 'Proposing…' : 'Propose variants'}
                   </button>
                   <p className="text-xs text-slate-400">
-                    Use the selection list above or enter positions manually to seed sequence exploration. Press Enter in either input to run.
+                    Use the selection list above or enter positions manually to seed sequence exploration. Press Enter in any input field to run.
                   </p>
                 </div>
               </section>
