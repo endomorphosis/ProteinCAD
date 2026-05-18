@@ -13,7 +13,7 @@ def _paths(tmp_path) -> bridge.BridgePaths:
     return bridge.resolve_paths(str(tmp_path / "bridge"))
 
 
-def _request_artifacts(path: Path) -> list[Path]:
+def _list_request_files(path: Path) -> list[Path]:
     return [item for item in path.glob("*.json") if not item.name.endswith(".result.json")]
 
 
@@ -33,7 +33,7 @@ def test_enqueue_and_run_cycle_with_inline_command(tmp_path):
     assert result["status"] == "completed"
     assert "bridge_ok" in result["stdout"]
     assert len(list(paths.queue_pending.glob("*.json"))) == 0
-    assert len(_request_artifacts(paths.queue_completed)) == 1
+    assert len(_list_request_files(paths.queue_completed)) == 1
 
 
 def test_run_cycle_uses_command_template_placeholders(tmp_path):
@@ -67,4 +67,4 @@ def test_run_cycle_fails_without_command_configuration(tmp_path):
     result = bridge.run_one_cycle(paths, command_template=None, timeout_seconds=5.0)
     assert result["status"] == "failed"
     assert "No bridge command configured" in (result["error"] or "")
-    assert len(_request_artifacts(paths.queue_failed)) == 1
+    assert len(_list_request_files(paths.queue_failed)) == 1

@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+MAX_LOG_CAPTURE_CHARS = 20000
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -156,7 +158,7 @@ def enqueue_request(
     command: Optional[str],
 ) -> dict[str, Any]:
     ensure_paths(paths)
-    request_id = f"bridge_{_run_id()}_{manifest_id or 'manifest'}"
+    request_id = f"bridge_{_run_id()}_{manifest_id or 'unknown_manifest'}"
     payload = {
         "request_id": request_id,
         "manifest_id": manifest_id,
@@ -254,8 +256,8 @@ def run_one_cycle(paths: BridgePaths, *, command_template: Optional[str], timeou
         "return_code": return_code,
         "started_at": started_at,
         "completed_at": completed_at,
-        "stdout": stdout[-20000:],
-        "stderr": stderr[-20000:],
+        "stdout": stdout[-MAX_LOG_CAPTURE_CHARS:],
+        "stderr": stderr[-MAX_LOG_CAPTURE_CHARS:],
         "error": error_text,
     }
 
@@ -339,6 +341,7 @@ def supervise_daemon(args: argparse.Namespace) -> int:
                 log_path=str(log_file),
             )
 
+            # Binary append keeps raw subprocess stream bytes intact across restarts.
             with log_file.open("ab") as handle:
                 child = subprocess.Popen(
                     cmd,
@@ -467,7 +470,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     supervise = subparsers.add_parser("supervise", parents=[common], help="Run daemon under supervisor")
-    supervise.add_argument("--watch", action="store_true", default=True, help="Restart child on exit")
+    supervise.add_argument("--watch", action="store_true", help="Restart child on exit")
     supervise.add_argument("--interval-seconds", type=float, default=15.0)
     supervise.add_argument("--command-timeout-seconds", type=float, default=1800.0)
     supervise.add_argument("--restart-backoff-seconds", type=float, default=30.0)

@@ -180,12 +180,23 @@ async function copyTextToClipboard(text: string) {
 
 function extractRetrievalBundle(payload: any): RetrievalBundle | null {
   if (!payload || typeof payload !== 'object') return null
-  if (payload.request_id && (payload.top_hits || payload.evidence_summary || payload.status || payload.result)) {
+  const isRetrievalBundleShape = (candidate: any): candidate is RetrievalBundle => {
+    if (!candidate || typeof candidate !== 'object') return false
+    const hasRequestId = typeof candidate.request_id === 'string' && candidate.request_id.length > 0
+    const hasCoreFields =
+      Array.isArray(candidate.top_hits) ||
+      typeof candidate.status === 'string' ||
+      typeof candidate.evidence_summary === 'object' ||
+      typeof candidate.result === 'object'
+    return hasRequestId && hasCoreFields
+  }
+
+  if (isRetrievalBundleShape(payload)) {
     return payload as RetrievalBundle
   }
   if (payload.result && typeof payload.result === 'object') {
     const nested = payload.result
-    if (nested.request_id || nested.top_hits || nested.evidence_summary || nested.dataset_manifests) {
+    if (isRetrievalBundleShape(nested)) {
       return {
         ...(payload as RetrievalBundle),
         result: nested,
@@ -250,7 +261,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   useEffect(() => {
     setResourcePreview(null)
     setResourceBundle(null)
-  }, [job.job_id])
+  }, [job])
 
   const inputSequence = typeof job.input?.sequence === 'string' ? job.input.sequence : ''
 
