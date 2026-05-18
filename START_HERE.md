@@ -92,13 +92,13 @@ Use **fallback** mode to try providers in priority order. Settings persist acros
 
 ## 7) (Optional) Validate BLAST retrieval grounding from the UI
 
-1. Open **Settings** and enable retrieval flags you want to test (`retrieval enabled`, and optionally `allow job grounding (opt-in)`).
+1. Open **Settings** and enable retrieval flags you want to test (`retrieval enabled`, and optionally `allow job grounding` to default new jobs to grounded mode).
 2. Create a new job and enable **Ground with BLAST evidence (opt-in)** in the job form.
 3. Confirm:
    - the job card shows a **BLAST** retrieval status badge
    - completed job results include **BLAST Grounding Evidence** with top hits/evidence/manifest references
 
-If retrieval grounding is disabled in backend config, grounded jobs will show retrieval as disabled or not requested.
+By default, backend grounding is opt-in (`MCP_RETRIEVAL_ENABLE_JOB_GROUNDING=false` unless changed), so grounded jobs may show retrieval as disabled or not requested until flags are enabled.
 
 ---
 

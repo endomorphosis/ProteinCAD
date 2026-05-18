@@ -9,7 +9,8 @@ Use this page as the **canonical entrypoint** to find the right guide.
 - Core MCP server + dashboard stack is active and documented in `README.md` and `START_HERE.md`.
 - BLAST retrieval is integrated across server, MCP, and dashboard surfaces.
 - Grounding remains opt-in by default for design jobs unless explicitly enabled in retrieval feature flags.
-- Latest major merged work: dashboard/server UX improvements (PR #4) and BLAST retrieval integration (PR #5).
+- BLAST RAG Milestones 0–4 are complete; the next active hardening task is retrieval contract/evidence wiring (see `BLAST_RAG_TODO.md`).
+- Latest major merged work: dashboard/server UX improvements (PR #4), BLAST retrieval integration (PR #5), and canonical docs alignment updates (PR #6).
 
 ---
 
