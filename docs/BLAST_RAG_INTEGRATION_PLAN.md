@@ -285,6 +285,7 @@ Planned additions:
 
 - data-init scripts to create DuckDB schema and seed presets
 - optional ETL wrappers that call `ipfs_datasets_py`
+- optional daemon/supervisor wrappers to process queued bridge requests for `ipfs_datasets_py` ETL handoff
 - maintenance scripts for cache pruning, manifest verification, and Parquet export
 
 ---

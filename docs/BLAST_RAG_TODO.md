@@ -26,22 +26,23 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 complete; post-milestone stabilization in progress
+- **Status**: Milestone 4 complete; stabilization plus Milestone 5 bridge scaffolding in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 4 exit criteria met; preparing Milestone 5 scope
-- **Next in-progress task**: Harden retrieval contract/evidence wiring based on dashboard + MCP feedback
+- **Current milestone**: Milestone 5 (initial slice) in progress
+- **Next in-progress task**: Add local BLAST+ provider support after retrieval contract hardening
 - **Primary edit targets**:
-  - `mcp-dashboard/components/BackendSettings.tsx`
-  - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `mcp-dashboard/lib/mcp-client.ts`
+  - `mcp-server/retrieval_provider.py`
+  - `mcp-server/runtime_config.py`
+  - `mcp-server/retrieval_bridge_daemon.py`
+  - `scripts/retrieval/ensure_ipfs_bridge_supervisor.sh`
   - `docs/BLAST_RAG_TODO.md`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - none
 - **Recommended first implementation slice**:
-  1. harden retrieval contract/evidence wiring and MCP resource consistency
-  2. tighten per-job grounding status/error messaging where edge cases remain
-  3. keep local BLAST+/ipfs bridge deferred until Milestone 5
+  1. finish local BLAST+ provider interface/config so remote and local providers share one contract
+  2. wire queued bridge requests from retrieval manifests into the ipfs bridge daemon command templates
+  3. keep IPFS publication fields optional until a concrete publication workflow is validated
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -161,7 +162,7 @@ Goal: support reproducible offline workflows after the remote path is stable.
 - [ ] Add local BLAST+ provider interface
 - [ ] Define local database configuration and discovery rules
 - [ ] Add export/import path for retrieval data as Parquet bundles
-- [ ] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
+- [x] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
 - [ ] Add optional manifest fields for IPFS CID/CAR references
 - [ ] Document when to choose remote BLAST vs local BLAST+
 
@@ -178,9 +179,9 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 1. [x] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
 2. [x] Add dashboard tests for retrieval settings and evidence rendering
-3. [ ] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
+3. [x] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
 4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
-5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
+5. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
 
 ---
 
@@ -188,19 +189,21 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: add dashboard retrieval e2e coverage for settings, grounding badges, and evidence rendering paths
-- **Next recommended task**: harden retrieval contract/evidence wiring based on dashboard + MCP review feedback
+- **Last completed task**: land retrieval resource normalization hardening plus optional ipfs bridge daemon/supervisor scripts
+- **Next recommended task**: add local BLAST+ provider interface/config and connect manifest-triggered bridge requests
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
-  - `mcp-dashboard/components/ProteinSequenceForm.tsx`
-  - `mcp-dashboard/components/JobList.tsx`
+  - `mcp-server/retrieval_provider.py`
+  - `mcp-server/runtime_config.py`
+  - `mcp-server/retrieval_bridge_daemon.py`
+  - `tests/test_retrieval_bridge_daemon.py`
   - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `mcp-dashboard/lib/mcp-client.ts`
-  - `mcp-server/server.py`
+  - `scripts/retrieval/ensure_ipfs_bridge_supervisor.sh`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - none
 - **Validation to run next time**:
+  - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_retrieval_bridge_daemon.py`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run lint`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run build`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && E2E_PORT=3401 npm run test:e2e`
