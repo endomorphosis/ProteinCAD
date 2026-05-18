@@ -18,10 +18,12 @@ The platform packages a complete protein design workflow behind a simple control
 
 - BLAST retrieval is integrated end-to-end (MCP server REST + MCP tools/resources + dashboard controls/evidence views).
 - Grounding for design jobs is available but remains **opt-in by default** (`MCP_RETRIEVAL_ENABLE_JOB_GROUNDING=true` to enable by default).
+- BLAST RAG milestones 0–4 are complete; the next active engineering task is hardening retrieval contract/evidence wiring before optional local BLAST+ follow-up.
 - Dashboard E2E coverage includes retrieval settings, grounded-job badges, and evidence/resource rendering paths.
 - Recent merged history includes:
   - PR #4: MCP server + dashboard UX improvements.
   - PR #5: BLAST retrieval integration and grounding/evidence UI wiring.
+  - PR #6: canonical documentation alignment for the retrieval-integrated stack.
 
 ### Protein design pipeline
 
@@ -241,6 +243,10 @@ Dashboard support includes:
 - Backend settings for BLAST retrieval feature flags and defaults
 - Per-job opt-in toggle to ground design runs with BLAST evidence
 - Job-level retrieval status and results evidence panels (top homologs, evidence packet, manifest refs)
+
+MCP support includes:
+- Tools: `start_blast_retrieval`, `get_blast_retrieval`
+- Resources: `retrieval://{request_id}`, `retrieval-manifest://{manifest_id}`
 
 `ipfs-datasets-py` remains optional and should only be used for non-BLAST ETL/packaging/publication workflows.
 
