@@ -26,22 +26,23 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 complete; post-milestone stabilization in progress
+- **Status**: Milestone 5 complete
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 4 exit criteria met; preparing Milestone 5 scope
-- **Next in-progress task**: Harden retrieval contract/evidence wiring based on dashboard + MCP feedback
+- **Current milestone**: Milestone 5 complete
+- **Next in-progress task**: None — all Milestone 5 items are done; begin Milestone 6 scoping if needed
 - **Primary edit targets**:
-  - `mcp-dashboard/components/BackendSettings.tsx`
-  - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `mcp-dashboard/lib/mcp-client.ts`
+  - `mcp-server/retrieval_store.py`
+  - `mcp-server/retrieval_bridge_daemon.py`
+  - `mcp-server/server.py`
+  - `tests/test_retrieval_bridge_daemon.py`
   - `docs/BLAST_RAG_TODO.md`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - none
-- **Recommended first implementation slice**:
-  1. harden retrieval contract/evidence wiring and MCP resource consistency
-  2. tighten per-job grounding status/error messaging where edge cases remain
-  3. keep local BLAST+/ipfs bridge deferred until Milestone 5
+- **Recommended next slice** (if scope continues):
+  1. Add a `retrieval_bridge_watch` script that polls completed bridge result files and calls `set_manifest_publication` on the store to keep DuckDB in sync after bridge jobs finish
+  2. Consider adding a vector-embedding adjunct to the evidence store for semantic search
+  3. Add rate-limit guards or back-off to the local BLAST+ provider for bulk job parallelism
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -158,12 +159,12 @@ Goal: expose retrieval controls and evidence visually.
 
 Goal: support reproducible offline workflows after the remote path is stable.
 
-- [ ] Add local BLAST+ provider interface
-- [ ] Define local database configuration and discovery rules
-- [ ] Add export/import path for retrieval data as Parquet bundles
-- [ ] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
-- [ ] Add optional manifest fields for IPFS CID/CAR references
-- [ ] Document when to choose remote BLAST vs local BLAST+
+- [x] Add local BLAST+ provider interface
+- [x] Define local database configuration and discovery rules
+- [x] Add export/import path for retrieval data as Parquet bundles
+- [x] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
+- [x] Add optional manifest fields for IPFS CID/CAR references
+- [x] Document when to choose remote BLAST vs local BLAST+
 
 ### Exit criteria
 
@@ -178,9 +179,12 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 1. [x] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
 2. [x] Add dashboard tests for retrieval settings and evidence rendering
-3. [ ] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
-4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
-5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
+3. [x] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
+4. [x] Add local BLAST+ provider support after the remote evidence path is stable
+5. [x] Add export/import path for retrieval data as Parquet bundles
+6. [x] Add optional manifest fields for IPFS CID/CAR references
+7. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
+8. [x] Document when to choose remote BLAST vs local BLAST+
 
 ---
 
@@ -188,22 +192,23 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: add dashboard retrieval e2e coverage for settings, grounding badges, and evidence rendering paths
-- **Next recommended task**: harden retrieval contract/evidence wiring based on dashboard + MCP review feedback
+- **Last completed task**: add optional IPFS CID/CAR manifest fields, bridge daemon back-annotation for publication results, REST/MCP publication endpoints, and remote vs local BLAST+ selection documentation
+- **Next recommended task**: Milestone 5 is complete. If scope continues, consider: (1) bridge watch script to sync DuckDB with completed bridge result CIDs, (2) evidence semantic search via embeddings, or (3) rate-limit guards for local BLAST+ bulk jobs
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
-  - `mcp-dashboard/components/ProteinSequenceForm.tsx`
-  - `mcp-dashboard/components/JobList.tsx`
-  - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `mcp-dashboard/lib/mcp-client.ts`
+  - `mcp-server/retrieval_store.py`
+  - `mcp-server/retrieval_service.py`
   - `mcp-server/server.py`
+  - `mcp-server/retrieval_bridge_daemon.py`
+  - `tests/test_blast_retrieval_config.py`
+  - `tests/test_retrieval_bridge_daemon.py`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - none
 - **Validation to run next time**:
+  - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_retrieval_bridge_daemon.py`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run lint`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run build`
-  - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && E2E_PORT=3401 npm run test:e2e`
   - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_blast_retrieval_config.py`
   - `docker build -t test-mcp-server /home/runner/work/ProteinCAD/ProteinCAD/mcp-server`
 

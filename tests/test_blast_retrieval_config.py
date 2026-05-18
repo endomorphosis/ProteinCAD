@@ -3,18 +3,26 @@
 import asyncio
 import importlib
 import json
+import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import duckdb
 import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
 mcp_server_module = importlib.import_module("server")
 
-from retrieval_provider import parse_submission_response
+from retrieval_provider import (
+    LocalBlastProvider,
+    RetrievalConfigError,
+    build_query_from_config,
+    parse_submission_response,
+    provider_from_config,
+)
 from retrieval_service import BlastRetrievalService
 from retrieval_store import RetrievalStore
 from runtime_config import MCPServerConfig, RuntimeConfigManager
@@ -139,6 +147,10 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_RETRIEVAL_HITLIST_SIZE", "40")
     monkeypatch.setenv("MCP_RETRIEVAL_MAX_POLL_ATTEMPTS", "12")
     monkeypatch.setenv("MCP_RETRIEVAL_EXPORT_PARQUET", "true")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_BLAST_BINARY", "/usr/local/bin/blastp")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE", "swissprot_local")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE_DIR", str(tmp_path / "blast-data" / "databases"))
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE_GLOB", "*.pin")
 
     cfg = MCPServerConfig()
     manager = RuntimeConfigManager(path=str(tmp_path / "config.json"))
@@ -150,8 +162,13 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     assert retrieval.feature_flags.allow_job_grounding is True
     assert retrieval.feature_flags.export_parquet is True
     assert retrieval.provider == "local_blast"
+    assert isinstance(provider_from_config(retrieval), LocalBlastProvider)
     assert retrieval.blast.default_program == "blastx"
     assert retrieval.blast.default_database == "nr"
+    assert retrieval.blast.local_blast_binary == "/usr/local/bin/blastp"
+    assert retrieval.blast.local_database == "swissprot_local"
+    assert Path(retrieval.blast.local_database_dir) == tmp_path / "blast-data" / "databases"
+    assert retrieval.blast.local_database_glob == "*.pin"
     assert retrieval.blast.default_hitlist_size == 40
     assert retrieval.blast.max_poll_attempts == 12
     assert Path(retrieval.storage.data_dir) == tmp_path / "blast-data"
@@ -185,8 +202,8 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
         }
     assert {"run_id", "hit_rank", "source_system", "source_id", "retrieved_at"} <= evidence_columns
     versions = store.migration_versions()
-    assert 4 in versions
-    assert max(versions) == 4
+    assert 5 in versions
+    assert max(versions) == 5
 
 
 def test_retrieval_store_skips_schema_when_disabled(tmp_path):
@@ -206,6 +223,59 @@ def test_parse_submission_response_extracts_rid_and_rtoe():
 
     assert submission.remote_request_id == "TEST123"
     assert submission.remote_queue_hint_seconds == 7
+
+
+def test_local_blast_provider_resolves_database_and_parses_hits(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.provider = "local_blast"
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.blast.local_blast_binary = "blastp-local"
+    cfg.retrieval.blast.local_database_dir = str(tmp_path / "blastdb")
+    cfg.retrieval.blast.local_database_glob = "*.pin"
+    cfg.retrieval.blast.default_database = "swissprot_local"
+    db_dir = Path(cfg.retrieval.blast.local_database_dir)
+    db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "swissprot_local.pin").write_text("", encoding="utf-8")
+
+    captured: Dict[str, object] = {}
+
+    def runner(command: List[str], fasta_query: str, timeout_seconds: float):
+        captured["command"] = list(command)
+        captured["fasta_query"] = fasta_query
+        captured["timeout_seconds"] = timeout_seconds
+        return subprocess.CompletedProcess(command, 0, MOCK_BLAST_XML, "")
+
+    provider = LocalBlastProvider(config=cfg.retrieval, command_runner=runner)
+    query = build_query_from_config(TEST_FASTA_QUERY, cfg.retrieval)
+    submission = asyncio.run(provider.submit(query))
+    result = asyncio.run(provider.collect_results(query, submission))
+
+    assert result.provider_name == "local_blast"
+    assert len(result.hits) == 1
+    assert captured["command"][0] == "blastp-local"
+    assert "-db" in captured["command"]
+    db_arg_index = captured["command"].index("-db") + 1
+    assert captured["command"][db_arg_index] == str(db_dir / "swissprot_local")
+    assert str(captured["fasta_query"]).startswith(">query")
+
+
+def test_local_blast_provider_fails_when_database_is_missing(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.provider = "local_blast"
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.blast.local_blast_binary = "blastp-local"
+    cfg.retrieval.blast.local_database_dir = str(tmp_path / "blastdb")
+    cfg.retrieval.blast.default_database = "missing_db"
+    Path(cfg.retrieval.blast.local_database_dir).mkdir(parents=True, exist_ok=True)
+
+    def runner(command: List[str], fasta_query: str, timeout_seconds: float):
+        raise AssertionError("Local BLAST runner should not be called when database resolution fails")
+
+    provider = LocalBlastProvider(config=cfg.retrieval, command_runner=runner)
+    query = build_query_from_config(TEST_FASTA_QUERY, cfg.retrieval)
+    submission = asyncio.run(provider.submit(query))
+    with pytest.raises(RetrievalConfigError, match="not found"):
+        asyncio.run(provider.collect_results(query, submission))
 
 
 def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
@@ -354,6 +424,113 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
     assert "failed" in str(result.result.get("error_text", "")).lower()
 
 
+def test_retrieval_service_imports_parquet_bundle_into_fresh_store(tmp_path):
+    source_cfg = MCPServerConfig()
+    source_cfg.retrieval.feature_flags.enabled = True
+    source_cfg.retrieval.feature_flags.evidence_enrichment = True
+    source_cfg.retrieval.feature_flags.export_parquet = True
+    source_cfg.retrieval.storage.data_dir = str(tmp_path / "source" / "retrieval")
+    source_cfg.retrieval.storage.duckdb_path = str(tmp_path / "source" / "retrieval" / "blast_retrieval.duckdb")
+    source_cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "source" / "retrieval" / "parquet")
+    source_cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "source" / "retrieval" / "raw_payloads")
+    source_cfg.retrieval.storage.manifest_dir = str(tmp_path / "source" / "retrieval" / "manifests")
+    handler, _request_counts = _mock_blast_handler()
+    source_store = RetrievalStore(source_cfg.retrieval)
+    source_service = BlastRetrievalService(
+        config=source_cfg.retrieval,
+        store=source_store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+    source_result = asyncio.run(source_service.retrieve(TEST_FASTA_QUERY))
+    manifest_path = source_result.result["dataset_manifests"][0]["manifest"]["manifest_path"]
+
+    target_cfg = MCPServerConfig()
+    target_cfg.retrieval.feature_flags.enabled = True
+    target_cfg.retrieval.feature_flags.evidence_enrichment = True
+    target_cfg.retrieval.feature_flags.export_parquet = False
+    target_cfg.retrieval.storage.data_dir = str(tmp_path / "target" / "retrieval")
+    target_cfg.retrieval.storage.duckdb_path = str(tmp_path / "target" / "retrieval" / "blast_retrieval.duckdb")
+    target_cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "target" / "retrieval" / "parquet")
+    target_cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "target" / "retrieval" / "raw_payloads")
+    target_cfg.retrieval.storage.manifest_dir = str(tmp_path / "target" / "retrieval" / "manifests")
+    target_store = RetrievalStore(target_cfg.retrieval)
+    target_service = BlastRetrievalService(config=target_cfg.retrieval, store=target_store)
+
+    imported = target_service.import_parquet_bundle(manifest_path)
+    imported_result = imported["result"]
+
+    assert imported["request_id"] == source_result.request_id
+    assert imported_result["request_id"] == source_result.request_id
+    assert imported_result["status"] == "completed"
+    assert imported_result["hits"][0]["accession"] == "ABC123"
+    assert imported_result["evidence_documents"][0]["source_id"] == "ABC123"
+    assert imported_result["dataset_manifests"][0]["manifest_id"] == f"{source_result.request_id}_parquet"
+    cache_entries = target_service.list_cached_requests()
+    assert any(entry["request_id"] == source_result.request_id for entry in cache_entries)
+
+
+def test_set_manifest_publication_updates_cid_and_car_fields(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.feature_flags.evidence_enrichment = True
+    cfg.retrieval.feature_flags.export_parquet = True
+    cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+    cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
+    cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
+    cfg.retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
+    handler, _ = _mock_blast_handler()
+    store = RetrievalStore(cfg.retrieval)
+    service = BlastRetrievalService(
+        config=cfg.retrieval,
+        store=store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+    result = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
+    manifest = service.export_request_parquet_bundle(result.request_id)
+    manifest_id = manifest["manifest_id"]
+
+    # Verify initial state has no publication fields set.
+    raw = service.get_dataset_manifest(manifest_id)
+    assert raw is not None
+    assert raw.get("ipfs_cid") is None
+    assert raw.get("ipfs_car_path") is None
+    assert raw.get("publication_status") is None
+
+    # Update CID/CAR/status and verify persistence.
+    updated = service.set_manifest_publication(
+        manifest_id,
+        ipfs_cid="bafybeiabc123",
+        ipfs_car_path="/exports/bundle.car",
+        publication_status="published",
+    )
+    assert updated is not None
+    assert updated["ipfs_cid"] == "bafybeiabc123"
+    assert updated["ipfs_car_path"] == "/exports/bundle.car"
+    assert updated["publication_status"] == "published"
+    # Verify the manifest_json inline field was also refreshed.
+    assert updated["manifest"]["ipfs_cid"] == "bafybeiabc123"
+    assert updated["manifest"]["publication_status"] == "published"
+
+    # Idempotent partial update should not overwrite fields not passed.
+    partial = service.set_manifest_publication(manifest_id, publication_status="verified")
+    assert partial is not None
+    assert partial["ipfs_cid"] == "bafybeiabc123"
+    assert partial["publication_status"] == "verified"
+
+    # Not-found case returns None.
+    missing = service.set_manifest_publication("nonexistent_manifest_id", ipfs_cid="bafy123")
+    assert missing is None
+
+    # Fields should appear in the list manifests response too.
+    listed = service.list_dataset_manifests()
+    found = next((m for m in listed if m["manifest_id"] == manifest_id), None)
+    assert found is not None
+    assert found["ipfs_cid"] == "bafybeiabc123"
+
+
 def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
     handler, request_counts = _mock_blast_handler()
     server = _configure_and_reset_server_for_retrieval(tmp_path, handler, export_parquet=True)
@@ -364,7 +541,13 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             tools_response = await client.get("/mcp/v1/tools")
             assert tools_response.status_code == 200
             tool_names = {tool["name"] for tool in tools_response.json()["tools"]}
-            assert {"start_blast_retrieval", "get_blast_retrieval"} <= tool_names
+            assert {
+                "start_blast_retrieval",
+                "get_blast_retrieval",
+                "export_blast_retrieval_bundle",
+                "import_blast_retrieval_bundle",
+                "set_retrieval_manifest_publication",
+            } <= tool_names
 
             create_response = await client.post(
                 "/api/retrieval/requests",
@@ -377,6 +560,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert created["hit_count"] == 1
             assert created["result"]["evidence_packet"]["document_count"] == 1
             manifest_id = created["result"]["dataset_manifests"][0]["manifest_id"]
+            manifest_path = created["result"]["dataset_manifests"][0]["manifest"]["manifest_path"]
 
             request_id = created["request_id"]
             fetch_response = await client.get(f"/api/retrieval/requests/{request_id}")
@@ -394,6 +578,20 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert entries[0]["request_id"] == request_id
             assert entries[0]["status"] == "completed"
             assert entries[0]["evidence_count"] == 1
+
+            export_response = await client.post(f"/api/retrieval/requests/{request_id}/export")
+            assert export_response.status_code == 200
+            exported_payload = export_response.json()
+            assert exported_payload["request_id"] == request_id
+            assert exported_payload["manifest"]["manifest_id"] == manifest_id
+
+            import_response = await client.post("/api/retrieval/import", json={"manifest_path": manifest_path})
+            assert import_response.status_code == 200
+            imported_payload = import_response.json()
+            assert imported_payload["request_id"] == request_id
+            assert imported_payload["manifest"]["manifest_id"] == manifest_id
+            assert imported_payload["retrieval"]["request_id"] == request_id
+            assert imported_payload["retrieval"]["hit_count"] == 1
 
             resources_response = await client.get("/mcp/v1/resources")
             assert resources_response.status_code == 200
@@ -437,11 +635,96 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert get_tool_payload["request_id"] == request_id
             assert get_tool_payload["result"]["evidence_packet"]["document_count"] == 1
 
+            export_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "export_blast_retrieval_bundle",
+                        "arguments": {"request_id": request_id},
+                    },
+                },
+            )
+            assert export_tool_response.status_code == 200
+            export_tool_payload = json.loads(export_tool_response.json()["result"]["content"][0]["text"])
+            assert export_tool_payload["request_id"] == request_id
+            assert export_tool_payload["manifest"]["manifest_id"] == manifest_id
+
+            import_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "import_blast_retrieval_bundle",
+                        "arguments": {"manifest_path": manifest_path},
+                    },
+                },
+            )
+            assert import_tool_response.status_code == 200
+            import_tool_payload = json.loads(import_tool_response.json()["result"]["content"][0]["text"])
+            assert import_tool_payload["request_id"] == request_id
+            assert import_tool_payload["manifest"]["manifest_id"] == manifest_id
+            assert import_tool_payload["retrieval"]["request_id"] == request_id
+
+            # REST GET/PATCH for manifest publication fields.
+            get_manifests_response = await client.get("/api/retrieval/manifests")
+            assert get_manifests_response.status_code == 200
+            manifests_list = get_manifests_response.json()["manifests"]
+            assert any(m["manifest_id"] == manifest_id for m in manifests_list)
+
+            get_manifest_response = await client.get(f"/api/retrieval/manifests/{manifest_id}")
+            assert get_manifest_response.status_code == 200
+            manifest_row = get_manifest_response.json()
+            assert manifest_row["manifest_id"] == manifest_id
+            assert manifest_row.get("ipfs_cid") is None
+
+            patch_response = await client.patch(
+                f"/api/retrieval/manifests/{manifest_id}",
+                json={"ipfs_cid": "bafytest123", "publication_status": "published"},
+            )
+            assert patch_response.status_code == 200
+            patched = patch_response.json()
+            assert patched["ipfs_cid"] == "bafytest123"
+            assert patched["publication_status"] == "published"
+
+            # MCP tool for publication update.
+            pub_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "set_retrieval_manifest_publication",
+                        "arguments": {
+                            "manifest_id": manifest_id,
+                            "ipfs_cid": "bafytest_updated",
+                            "publication_status": "verified",
+                        },
+                    },
+                },
+            )
+            assert pub_tool_response.status_code == 200
+            pub_tool_payload = json.loads(pub_tool_response.json()["result"]["content"][0]["text"])
+            assert pub_tool_payload["ipfs_cid"] == "bafytest_updated"
+            assert pub_tool_payload["publication_status"] == "verified"
+
+            # Not-found case returns an error payload.
+            notfound_patch = await client.patch(
+                "/api/retrieval/manifests/nonexistent_manifest",
+                json={"ipfs_cid": "bafy999"},
+            )
+            assert notfound_patch.status_code == 404
+
             resource_read_response = await client.post(
                 "/mcp",
                 json={
                     "jsonrpc": "2.0",
-                    "id": 3,
+                    "id": 6,
                     "method": "resources/read",
                     "params": {"uri": f"retrieval://{request_id}"},
                 },

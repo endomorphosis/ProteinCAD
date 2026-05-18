@@ -19,7 +19,7 @@ from runtime_config import RetrievalConfig
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_STATEMENTS = (
     # Latest schema definition for fresh databases.
@@ -151,7 +151,10 @@ SCHEMA_STATEMENTS = (
         parquet_path VARCHAR,
         raw_payload_dir VARCHAR,
         manifest_json TEXT,
-        created_at TIMESTAMP NOT NULL
+        created_at TIMESTAMP NOT NULL,
+        ipfs_cid VARCHAR,
+        ipfs_car_path VARCHAR,
+        publication_status VARCHAR
     )
     """,
 )
@@ -166,6 +169,10 @@ MIGRATION_STATEMENTS = (
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP",
     "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS request_id VARCHAR",
     "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS run_id VARCHAR",
+    # Schema version 4 -> 5: optional IPFS publication references on dataset manifests.
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS ipfs_cid VARCHAR",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS ipfs_car_path VARCHAR",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS publication_status VARCHAR",
 )
 
 
@@ -214,7 +221,7 @@ class RetrievalStore:
                     VALUES (?, ?, ?)
                     ON CONFLICT DO NOTHING
                     """,
-                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment and parquet exports", _utcnow()],
+                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment, parquet exports, and IPFS publication fields", _utcnow()],
                 )
             self.initialized = True
             self.last_error = None
@@ -475,6 +482,9 @@ class RetrievalStore:
         parquet_path: str,
         raw_payload_dir: str,
         manifest_json: str,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
     ) -> None:
         with self._lock:
             with self._connect() as conn:
@@ -482,9 +492,9 @@ class RetrievalStore:
                     """
                     INSERT INTO dataset_manifests (
                         manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                        raw_payload_dir, manifest_json, created_at
+                        raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (manifest_id) DO UPDATE SET
                         request_id = excluded.request_id,
                         run_id = excluded.run_id,
@@ -494,7 +504,10 @@ class RetrievalStore:
                         parquet_path = excluded.parquet_path,
                         raw_payload_dir = excluded.raw_payload_dir,
                         manifest_json = excluded.manifest_json,
-                        created_at = excluded.created_at
+                        created_at = excluded.created_at,
+                        ipfs_cid = COALESCE(excluded.ipfs_cid, dataset_manifests.ipfs_cid),
+                        ipfs_car_path = COALESCE(excluded.ipfs_car_path, dataset_manifests.ipfs_car_path),
+                        publication_status = COALESCE(excluded.publication_status, dataset_manifests.publication_status)
                     """,
                     [
                         manifest_id,
@@ -507,6 +520,9 @@ class RetrievalStore:
                         raw_payload_dir,
                         manifest_json,
                         _utcnow(),
+                        ipfs_cid,
+                        ipfs_car_path,
+                        publication_status,
                     ],
                 )
 
@@ -660,6 +676,9 @@ class RetrievalStore:
             "annotation_count": int(count_row[3] or 0),
             "evidence_count": int(count_row[4] or 0),
             "created_at": _utcnow().isoformat(),
+            "ipfs_cid": None,
+            "ipfs_car_path": None,
+            "publication_status": None,
         }
         manifest_json = json.dumps(manifest, sort_keys=True)
         temp_manifest_path.write_text(manifest_json, encoding="utf-8")
@@ -679,6 +698,240 @@ class RetrievalStore:
             manifest_json=manifest_json,
         )
         return manifest
+
+    def import_request_parquet_bundle(self, *, manifest_path: str) -> Dict[str, Any]:
+        self.ensure_schema()
+        manifest_file = Path(manifest_path).expanduser()
+        if not manifest_file.exists():
+            raise FileNotFoundError(f"Retrieval manifest not found: {manifest_file}")
+
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("Retrieval manifest payload must be a JSON object")
+        parquet_files = manifest.get("parquet_files")
+        if not isinstance(parquet_files, dict):
+            raise ValueError("Retrieval manifest is missing parquet_files")
+
+        required_files = ("request", "runs", "hits", "alignments", "annotations", "evidence_documents")
+        resolved_files: Dict[str, str] = {}
+        for file_key in required_files:
+            raw_path = parquet_files.get(file_key)
+            if not raw_path:
+                raise ValueError(f"Retrieval manifest is missing parquet_files.{file_key}")
+            resolved = self._resolve_manifest_path(
+                str(raw_path),
+                manifest_file=manifest_file,
+                parquet_root=manifest.get("parquet_path"),
+            )
+            if not resolved.exists():
+                raise FileNotFoundError(f"Parquet file for {file_key} does not exist: {resolved}")
+            resolved_files[file_key] = str(resolved)
+
+        with self._lock:
+            with self._connect() as conn:
+                request_row = conn.execute(
+                    """
+                    SELECT request_id, cache_key, provider
+                    FROM read_parquet(?)
+                    LIMIT 1
+                    """,
+                    [resolved_files["request"]],
+                ).fetchone()
+                if not request_row:
+                    raise ValueError("Request parquet does not contain a retrieval request row")
+                request_id = str(request_row[0])
+                cache_key = str(request_row[1])
+                provider = str(request_row[2])
+
+                existing_run_ids = [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT run_id FROM retrieval_runs WHERE request_id = ?",
+                        [request_id],
+                    ).fetchall()
+                ]
+                if existing_run_ids:
+                    for run_id in existing_run_ids:
+                        conn.execute("DELETE FROM blast_alignments WHERE run_id = ?", [run_id])
+                        conn.execute("DELETE FROM blast_hits WHERE run_id = ?", [run_id])
+
+                conn.execute("DELETE FROM retrieval_runs WHERE request_id = ?", [request_id])
+                conn.execute("DELETE FROM protein_annotations WHERE request_id = ?", [request_id])
+                conn.execute("DELETE FROM evidence_documents WHERE request_id = ?", [request_id])
+                conn.execute("DELETE FROM dataset_manifests WHERE request_id = ?", [request_id])
+                conn.execute("DELETE FROM retrieval_cache_entries WHERE request_id = ?", [request_id])
+                conn.execute("DELETE FROM retrieval_requests WHERE request_id = ?", [request_id])
+
+                conn.execute(
+                    """
+                    INSERT INTO retrieval_requests (
+                        request_id, cache_key, provider, query_sequence, normalized_sequence,
+                        request_params_json, requested_at, status, error_text
+                    )
+                    SELECT request_id, cache_key, provider, query_sequence, normalized_sequence,
+                           request_params_json, requested_at, status, error_text
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["request"]],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO retrieval_runs (
+                        run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
+                        submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
+                    )
+                    SELECT run_id, request_id, provider, remote_request_id, remote_queue_hint_seconds,
+                           submitted_at, last_polled_at, completed_at, raw_payload_json, raw_payload_path
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["runs"]],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO blast_hits (
+                        run_id, hit_rank, accession, title, organism, e_value, bit_score,
+                        identity_fraction, positives_fraction, query_coverage, subject_coverage,
+                        alignment_length, subject_length, raw_hit_json
+                    )
+                    SELECT run_id, hit_rank, accession, title, organism, e_value, bit_score,
+                           identity_fraction, positives_fraction, query_coverage, subject_coverage,
+                           alignment_length, subject_length, raw_hit_json
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["hits"]],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO blast_alignments (
+                        run_id, hit_rank, hsp_index, query_from_pos, query_to_pos,
+                        subject_from_pos, subject_to_pos, alignment_length, identity_count,
+                        positive_count, gap_count, query_sequence, subject_sequence, midline,
+                        raw_alignment_json
+                    )
+                    SELECT run_id, hit_rank, hsp_index, query_from_pos, query_to_pos,
+                           subject_from_pos, subject_to_pos, alignment_length, identity_count,
+                           positive_count, gap_count, query_sequence, subject_sequence, midline,
+                           raw_alignment_json
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["alignments"]],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO protein_annotations (
+                        request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                        organism, annotation_json, retrieved_at, transform_version
+                    )
+                    SELECT request_id, run_id, hit_rank, source_system, source_id, accession, title,
+                           organism, annotation_json, retrieved_at, transform_version
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["annotations"]],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO evidence_documents (
+                        evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                        content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
+                    )
+                    SELECT evidence_id, request_id, run_id, hit_rank, source_system, source_id, title,
+                           content_text, content_json, transform_version, manifest_id, retrieved_at, created_at
+                    FROM read_parquet(?)
+                    """,
+                    [resolved_files["evidence_documents"]],
+                )
+
+                latest_run = conn.execute(
+                    """
+                    SELECT run_id, raw_payload_path, completed_at
+                    FROM retrieval_runs
+                    WHERE request_id = ?
+                    ORDER BY submitted_at DESC
+                    LIMIT 1
+                    """,
+                    [request_id],
+                ).fetchone()
+                latest_run_id = str(latest_run[0]) if latest_run else None
+                latest_payload_path = str(latest_run[1]) if latest_run and latest_run[1] else None
+                latest_completed_at = latest_run[2] if latest_run else None
+                if latest_completed_at is not None:
+                    conn.execute(
+                        "UPDATE retrieval_requests SET status = ?, error_text = NULL WHERE request_id = ?",
+                        ["completed", request_id],
+                    )
+                hit_count = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM blast_hits h
+                        INNER JOIN retrieval_runs r ON r.run_id = h.run_id
+                        WHERE r.request_id = ?
+                        """,
+                        [request_id],
+                    ).fetchone()[0]
+                    or 0
+                )
+
+                conn.execute(
+                    """
+                    INSERT INTO retrieval_cache_entries (
+                        cache_key, request_id, provider, hit_count, storage_path, created_at, expires_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, NULL)
+                    ON CONFLICT (cache_key) DO UPDATE SET
+                        request_id = excluded.request_id,
+                        provider = excluded.provider,
+                        hit_count = excluded.hit_count,
+                        storage_path = excluded.storage_path,
+                        created_at = excluded.created_at
+                    """,
+                    [cache_key, request_id, provider, hit_count, latest_payload_path, _utcnow()],
+                )
+
+        imported_manifest = dict(manifest)
+        manifest_id = str(imported_manifest.get("manifest_id") or f"{request_id}_parquet")
+        imported_manifest["manifest_id"] = manifest_id
+        imported_manifest["request_id"] = request_id
+        imported_manifest["run_id"] = imported_manifest.get("run_id") or latest_run_id
+        imported_manifest["parquet_path"] = str(Path(resolved_files["request"]).expanduser().resolve().parent)
+        imported_manifest["manifest_path"] = str(manifest_file.resolve())
+        imported_manifest["parquet_files"] = dict(resolved_files)
+        imported_manifest.setdefault("raw_payload_dir", self.config.storage.raw_payload_dir)
+
+        manifest_json = json.dumps(imported_manifest, sort_keys=True)
+        self.upsert_dataset_manifest(
+            manifest_id=manifest_id,
+            request_id=request_id,
+            run_id=imported_manifest.get("run_id"),
+            provider=str(imported_manifest.get("provider") or provider),
+            source_system=str(imported_manifest.get("source_system") or "ncbi_blast"),
+            transform_version=str(imported_manifest.get("transform_version") or "blast_evidence_v1"),
+            parquet_path=str(imported_manifest.get("parquet_path") or ""),
+            raw_payload_dir=str(imported_manifest.get("raw_payload_dir") or self.config.storage.raw_payload_dir),
+            manifest_json=manifest_json,
+        )
+        return imported_manifest
+
+    def _resolve_manifest_path(
+        self,
+        raw_path: str,
+        *,
+        manifest_file: Path,
+        parquet_root: Optional[Any],
+    ) -> Path:
+        path_candidate = Path(str(raw_path)).expanduser()
+        if path_candidate.is_absolute():
+            return path_candidate.resolve()
+
+        if parquet_root:
+            root_candidate = Path(str(parquet_root)).expanduser()
+            if not root_candidate.is_absolute():
+                root_candidate = (manifest_file.parent / root_candidate).resolve()
+            combined = (root_candidate / path_candidate).resolve()
+            if combined.exists():
+                return combined
+
+        return (manifest_file.parent / path_candidate).resolve()
 
     def upsert_cache_entry(
         self,
@@ -846,7 +1099,7 @@ class RetrievalStore:
                 manifest_cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     WHERE request_id = ?
                     ORDER BY created_at ASC
@@ -933,7 +1186,7 @@ class RetrievalStore:
                 cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     WHERE manifest_id = ?
                     """,
@@ -956,7 +1209,7 @@ class RetrievalStore:
                 cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -969,6 +1222,65 @@ class RetrievalStore:
                     if isinstance(manifest.get("manifest_json"), str):
                         manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
                 return manifests
+
+    def set_manifest_publication(
+        self,
+        manifest_id: str,
+        *,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update IPFS CID/CAR publication fields on an existing manifest row.
+
+        Returns the updated manifest row, or None if the manifest was not found.
+        """
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return None
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT manifest_id FROM dataset_manifests WHERE manifest_id = ?",
+                    [manifest_id],
+                ).fetchone()
+                if not row:
+                    return None
+                if ipfs_cid is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET ipfs_cid = ? WHERE manifest_id = ?",
+                        [ipfs_cid, manifest_id],
+                    )
+                if ipfs_car_path is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET ipfs_car_path = ? WHERE manifest_id = ?",
+                        [ipfs_car_path, manifest_id],
+                    )
+                if publication_status is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET publication_status = ? WHERE manifest_id = ?",
+                        [publication_status, manifest_id],
+                    )
+                # Refresh manifest_json to include the new publication fields.
+                cur = conn.execute(
+                    """
+                    SELECT manifest_json, ipfs_cid, ipfs_car_path, publication_status
+                    FROM dataset_manifests WHERE manifest_id = ?
+                    """,
+                    [manifest_id],
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return None
+                existing_json = json.loads(updated[0]) if isinstance(updated[0], str) else (updated[0] or {})
+                existing_json["ipfs_cid"] = updated[1]
+                existing_json["ipfs_car_path"] = updated[2]
+                existing_json["publication_status"] = updated[3]
+                updated_manifest_json = json.dumps(existing_json, sort_keys=True)
+                conn.execute(
+                    "UPDATE dataset_manifests SET manifest_json = ? WHERE manifest_id = ?",
+                    [updated_manifest_json, manifest_id],
+                )
+        return self.get_dataset_manifest(manifest_id)
 
     def schema_tables(self) -> set[str]:
         with self._lock:

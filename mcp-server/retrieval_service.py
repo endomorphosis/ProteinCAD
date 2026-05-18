@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
@@ -86,10 +87,16 @@ class BlastRetrievalService:
         store: RetrievalStore,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         sleeper: Optional[Callable[[float], Awaitable[None]]] = None,
+        local_command_runner: Optional[Callable[[List[str], str, float], subprocess.CompletedProcess[str]]] = None,
     ) -> None:
         self._config = config
         self._store = store
-        self._provider = provider_from_config(config, transport=transport, sleeper=sleeper)
+        self._provider = provider_from_config(
+            config,
+            transport=transport,
+            sleeper=sleeper,
+            local_command_runner=local_command_runner,
+        )
 
     async def retrieve(
         self,
@@ -220,6 +227,53 @@ class BlastRetrievalService:
 
     def list_dataset_manifests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
         return self._store.list_dataset_manifests(limit=limit)
+
+    def set_manifest_publication(
+        self,
+        manifest_id: str,
+        *,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update IPFS CID/CAR publication fields on a manifest.
+
+        Returns the updated manifest row or None if not found.
+        """
+        self._store.ensure_schema()
+        return self._store.set_manifest_publication(
+            manifest_id,
+            ipfs_cid=ipfs_cid,
+            ipfs_car_path=ipfs_car_path,
+            publication_status=publication_status,
+        )
+
+    def export_request_parquet_bundle(self, request_id: str) -> Dict[str, Any]:
+        self._store.ensure_schema()
+        payload = self._store.get_request_result(request_id)
+        if not payload:
+            raise RetrievalConfigError(f"BLAST retrieval request not found: {request_id}")
+        runs = list(payload.get("runs") or [])
+        latest_run = runs[-1] if runs else {}
+        provider = str(payload.get("provider") or latest_run.get("provider") or self._provider.provider_name)
+        return self._store.export_request_parquet_bundle(
+            request_id=request_id,
+            run_id=latest_run.get("run_id"),
+            provider=provider,
+            source_system="ncbi_blast",
+            transform_version=EVIDENCE_TRANSFORM_VERSION,
+        )
+
+    def import_parquet_bundle(self, manifest_path: str) -> Dict[str, Any]:
+        self._store.ensure_schema()
+        manifest = self._store.import_request_parquet_bundle(manifest_path=manifest_path)
+        request_id = str(manifest.get("request_id") or "").strip()
+        if not request_id:
+            raise RetrievalConfigError("Imported retrieval manifest did not include request_id")
+        result = self.get_request_result(request_id)
+        if not result:
+            raise RetrievalConfigError(f"Imported retrieval request not found after import: {request_id}")
+        return {"request_id": request_id, "manifest": manifest, "result": result}
 
     def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
         evidence_documents = list(result.get("evidence_documents") or [])
