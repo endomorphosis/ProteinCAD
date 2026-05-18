@@ -26,10 +26,10 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 in progress
+- **Status**: Milestone 4 complete; post-milestone stabilization in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 4 — Dashboard exposure
-- **Next in-progress task**: add dashboard tests around retrieval evidence rendering and grounding status flows
+- **Current milestone**: Milestone 4 exit criteria met; preparing Milestone 5 scope
+- **Next in-progress task**: Harden retrieval contract/evidence wiring based on dashboard + MCP feedback
 - **Primary edit targets**:
   - `mcp-dashboard/components/BackendSettings.tsx`
   - `mcp-dashboard/components/ResultsViewer.tsx`
@@ -39,10 +39,9 @@ If the snapshot is stale, update it before starting implementation work.
 - **Open decisions blocking deeper implementation**:
   - none
 - **Recommended first implementation slice**:
-  1. stabilize dashboard retrieval evidence UX and contract tests
-  2. harden per-job grounding status/error messaging and resource links
-  3. complete dashboard e2e coverage for retrieval submission + evidence browsing
-  4. keep local BLAST+/ipfs bridge deferred until Milestone 5
+  1. harden retrieval contract/evidence wiring and MCP resource consistency
+  2. tighten per-job grounding status/error messaging where edge cases remain
+  3. keep local BLAST+/ipfs bridge deferred until Milestone 5
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 

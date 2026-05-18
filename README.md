@@ -14,6 +14,15 @@ The platform packages a complete protein design workflow behind a simple control
   - **Embedded runners** (ProteinMPNN in-process; others configurable)
   - **Hybrid fallback routing** — try providers in priority order
 
+### Current repository state (as of 2026-05)
+
+- BLAST retrieval is integrated end-to-end (MCP server REST + MCP tools/resources + dashboard controls/evidence views).
+- Grounding for design jobs is available but remains **opt-in by default** (`MCP_RETRIEVAL_ENABLE_JOB_GROUNDING=true` to enable by default).
+- Dashboard E2E coverage includes retrieval settings, grounded-job badges, and evidence/resource rendering paths.
+- Recent merged history includes:
+  - PR #4: MCP server + dashboard UX improvements.
+  - PR #5: BLAST retrieval integration and grounding/evidence UI wiring.
+
 ### Protein design pipeline
 
 | Step | Tool | What it does |
