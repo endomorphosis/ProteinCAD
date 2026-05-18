@@ -393,7 +393,7 @@ class LocalBlastProvider(RetrievalProvider):
         if completed.returncode != 0:
             # Keep only the stderr tail so operator-facing errors stay concise.
             detail = (
-                stderr[-_MAX_LOCAL_BLAST_ERROR_DETAIL_CHARS :]
+                stderr[-_MAX_LOCAL_BLAST_ERROR_DETAIL_CHARS:]
                 if stderr
                 else f"exit code {completed.returncode}"
             )
