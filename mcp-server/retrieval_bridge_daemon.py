@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -209,8 +210,6 @@ def _extract_publication_fields(stdout: str) -> dict[str, Any]:
         parsed = json.loads(text)
     except Exception:
         # Scan for the last JSON-looking object in stdout for commands that mix log/JSON output.
-        import re
-
         json_candidates = re.findall(r"\{[^{}]+\}", text, re.DOTALL)
         parsed = None
         for candidate in reversed(json_candidates):
