@@ -36,6 +36,9 @@ The dashboard will be available at http://localhost:3000
 - View and download results
 - Check service health status
 - Launch Jupyter notebooks
+- Configure BLAST retrieval feature flags/defaults from Settings
+- Submit jobs with per-job BLAST grounding controls
+- Inspect BLAST grounding evidence in results (top hits, evidence docs, manifest refs)
 
 ## Environment Variables
 

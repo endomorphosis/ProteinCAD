@@ -4,6 +4,13 @@ This repo has accumulated documentation across several areas: the MCP control-pl
 
 Use this page as the **canonical entrypoint** to find the right guide.
 
+## Current status snapshot (2026-05)
+
+- Core MCP server + dashboard stack is active and documented in `README.md` and `START_HERE.md`.
+- BLAST retrieval is integrated across server, MCP, and dashboard surfaces.
+- Grounding remains opt-in by default for design jobs unless explicitly enabled in retrieval feature flags.
+- Latest major merged work: dashboard/server UX improvements (PR #4) and BLAST retrieval integration (PR #5).
+
 ---
 
 ## Getting started
@@ -22,8 +29,8 @@ Use this page as the **canonical entrypoint** to find the right guide.
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Component overview, run modes, request flow, backend routing, API surface |
-| [BLAST_RAG_INTEGRATION_PLAN.md](BLAST_RAG_INTEGRATION_PLAN.md) | DuckDB-first plan for integrating NCBI BLAST retrieval, evidence caching, dashboard grounding UX, and optional `ipfs_datasets_py` ingestion |
-| [BLAST_RAG_TODO.md](BLAST_RAG_TODO.md) | Actionable multi-session todo ledger for BLAST RAG work, including dashboard evidence/grounding milestones and quick-resume state |
+| [BLAST_RAG_INTEGRATION_PLAN.md](BLAST_RAG_INTEGRATION_PLAN.md) | Architecture, defaults, storage policy, and implementation boundary for BLAST retrieval + optional `ipfs_datasets_py` ETL |
+| [BLAST_RAG_TODO.md](BLAST_RAG_TODO.md) | Current execution ledger and session-resume state (Milestone progress, next active task, handoff notes) |
 | [AGENTS.md](AGENTS.md) | How AI agents and contributors should interact with the codebase deterministically |
 
 ---

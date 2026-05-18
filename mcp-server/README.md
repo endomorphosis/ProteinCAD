@@ -37,6 +37,12 @@ If you’re running the full stack via `./scripts/run_dashboard_stack.sh`, the M
 - `RFDIFFUSION_URL` - RFDiffusion service endpoint (default: http://localhost:8082 when running locally)
 - `PROTEINMPNN_URL` - ProteinMPNN service endpoint (default: http://localhost:8083 when running locally)
 - `ALPHAFOLD_MULTIMER_URL` - AlphaFold-Multimer service endpoint (default: http://localhost:8084 when running locally)
+- `MCP_RETRIEVAL_ENABLED` - Enable BLAST retrieval subsystem
+- `MCP_RETRIEVAL_EXPOSE_REST` - Expose `/api/retrieval/*` REST endpoints
+- `MCP_RETRIEVAL_EXPOSE_MCP` - Expose MCP retrieval tools/resources
+- `MCP_RETRIEVAL_ENABLE_JOB_GROUNDING` - Allow design-job grounding by default (default is disabled/opt-in)
+- `MCP_RETRIEVAL_EXPORT_PARQUET` - Enable optional Parquet bundle export
+- `MCP_RETRIEVAL_DATA_DIR` / `MCP_RETRIEVAL_DUCKDB_PATH` - Retrieval storage location overrides
 
 Note: in this repo’s dashboard compose stacks, model services are typically published on host ports `18081–18084` and the stack sets these URLs accordingly.
 
@@ -51,6 +57,24 @@ See [DOCKER_MCP_README.md](../docs/DOCKER_MCP_README.md) for detailed API docume
 - `include_metrics=1`: include stage timing + best-effort metrics snapshots
 - `include_residency=1`: include page-cache residency sampling (slower)
 - `include_error_detail=1`: include full error detail (default responses keep errors UI-safe via summarization/truncation)
+
+### BLAST retrieval endpoints
+
+When retrieval REST exposure is enabled:
+
+- `POST /api/retrieval/requests`: submit a retrieval request
+- `GET /api/retrieval/requests/{request_id}`: read normalized retrieval bundle/status
+- `GET /api/retrieval/cache`: list cached retrieval entries
+
+MCP exposure includes tools:
+
+- `start_blast_retrieval`
+- `get_blast_retrieval`
+
+And resources:
+
+- `retrieval://{request_id}`
+- `retrieval-manifest://{manifest_id}`
 
 ### Handy scripts
 
