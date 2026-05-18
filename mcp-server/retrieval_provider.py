@@ -391,6 +391,7 @@ class LocalBlastProvider(RetrievalProvider):
         )
         stderr = (completed.stderr or "").strip()
         if completed.returncode != 0:
+            # Keep only the stderr tail so operator-facing errors stay concise.
             detail = (
                 stderr[-_MAX_LOCAL_BLAST_ERROR_DETAIL_CHARS :]
                 if stderr

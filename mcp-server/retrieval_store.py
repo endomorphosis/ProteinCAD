@@ -732,9 +732,9 @@ class RetrievalStore:
                     ).fetchall()
                 ]
                 if existing_run_ids:
-                    placeholders = ",".join("?" for _ in existing_run_ids)
-                    conn.execute(f"DELETE FROM blast_alignments WHERE run_id IN ({placeholders})", existing_run_ids)
-                    conn.execute(f"DELETE FROM blast_hits WHERE run_id IN ({placeholders})", existing_run_ids)
+                    for run_id in existing_run_ids:
+                        conn.execute("DELETE FROM blast_alignments WHERE run_id = ?", [run_id])
+                        conn.execute("DELETE FROM blast_hits WHERE run_id = ?", [run_id])
 
                 conn.execute("DELETE FROM retrieval_runs WHERE request_id = ?", [request_id])
                 conn.execute("DELETE FROM protein_annotations WHERE request_id = ?", [request_id])

@@ -21,6 +21,7 @@ from retrieval_provider import (
     RetrievalConfigError,
     build_query_from_config,
     parse_submission_response,
+    provider_from_config,
 )
 from retrieval_service import BlastRetrievalService
 from retrieval_store import RetrievalStore
@@ -161,6 +162,7 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     assert retrieval.feature_flags.allow_job_grounding is True
     assert retrieval.feature_flags.export_parquet is True
     assert retrieval.provider == "local_blast"
+    assert isinstance(provider_from_config(retrieval), LocalBlastProvider)
     assert retrieval.blast.default_program == "blastx"
     assert retrieval.blast.default_database == "nr"
     assert retrieval.blast.local_blast_binary == "/usr/local/bin/blastp"
