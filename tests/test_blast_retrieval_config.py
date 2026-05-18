@@ -422,6 +422,52 @@ def test_remote_retrieval_service_surfaces_upstream_failures(tmp_path):
     assert "failed" in str(result.result.get("error_text", "")).lower()
 
 
+def test_retrieval_service_imports_parquet_bundle_into_fresh_store(tmp_path):
+    source_cfg = MCPServerConfig()
+    source_cfg.retrieval.feature_flags.enabled = True
+    source_cfg.retrieval.feature_flags.evidence_enrichment = True
+    source_cfg.retrieval.feature_flags.export_parquet = True
+    source_cfg.retrieval.storage.data_dir = str(tmp_path / "source" / "retrieval")
+    source_cfg.retrieval.storage.duckdb_path = str(tmp_path / "source" / "retrieval" / "blast_retrieval.duckdb")
+    source_cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "source" / "retrieval" / "parquet")
+    source_cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "source" / "retrieval" / "raw_payloads")
+    source_cfg.retrieval.storage.manifest_dir = str(tmp_path / "source" / "retrieval" / "manifests")
+    handler, _request_counts = _mock_blast_handler()
+    source_store = RetrievalStore(source_cfg.retrieval)
+    source_service = BlastRetrievalService(
+        config=source_cfg.retrieval,
+        store=source_store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+    source_result = asyncio.run(source_service.retrieve(TEST_FASTA_QUERY))
+    manifest_path = source_result.result["dataset_manifests"][0]["manifest"]["manifest_path"]
+
+    target_cfg = MCPServerConfig()
+    target_cfg.retrieval.feature_flags.enabled = True
+    target_cfg.retrieval.feature_flags.evidence_enrichment = True
+    target_cfg.retrieval.feature_flags.export_parquet = False
+    target_cfg.retrieval.storage.data_dir = str(tmp_path / "target" / "retrieval")
+    target_cfg.retrieval.storage.duckdb_path = str(tmp_path / "target" / "retrieval" / "blast_retrieval.duckdb")
+    target_cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "target" / "retrieval" / "parquet")
+    target_cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "target" / "retrieval" / "raw_payloads")
+    target_cfg.retrieval.storage.manifest_dir = str(tmp_path / "target" / "retrieval" / "manifests")
+    target_store = RetrievalStore(target_cfg.retrieval)
+    target_service = BlastRetrievalService(config=target_cfg.retrieval, store=target_store)
+
+    imported = target_service.import_parquet_bundle(manifest_path)
+    imported_result = imported["result"]
+
+    assert imported["request_id"] == source_result.request_id
+    assert imported_result["request_id"] == source_result.request_id
+    assert imported_result["status"] == "completed"
+    assert imported_result["hits"][0]["accession"] == "ABC123"
+    assert imported_result["evidence_documents"][0]["source_id"] == "ABC123"
+    assert imported_result["dataset_manifests"][0]["manifest_id"] == f"{source_result.request_id}_parquet"
+    cache_entries = target_service.list_cached_requests()
+    assert any(entry["request_id"] == source_result.request_id for entry in cache_entries)
+
+
 def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
     handler, request_counts = _mock_blast_handler()
     server = _configure_and_reset_server_for_retrieval(tmp_path, handler, export_parquet=True)
@@ -432,7 +478,12 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             tools_response = await client.get("/mcp/v1/tools")
             assert tools_response.status_code == 200
             tool_names = {tool["name"] for tool in tools_response.json()["tools"]}
-            assert {"start_blast_retrieval", "get_blast_retrieval"} <= tool_names
+            assert {
+                "start_blast_retrieval",
+                "get_blast_retrieval",
+                "export_blast_retrieval_bundle",
+                "import_blast_retrieval_bundle",
+            } <= tool_names
 
             create_response = await client.post(
                 "/api/retrieval/requests",
@@ -445,6 +496,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert created["hit_count"] == 1
             assert created["result"]["evidence_packet"]["document_count"] == 1
             manifest_id = created["result"]["dataset_manifests"][0]["manifest_id"]
+            manifest_path = created["result"]["dataset_manifests"][0]["manifest"]["manifest_path"]
 
             request_id = created["request_id"]
             fetch_response = await client.get(f"/api/retrieval/requests/{request_id}")
@@ -462,6 +514,20 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert entries[0]["request_id"] == request_id
             assert entries[0]["status"] == "completed"
             assert entries[0]["evidence_count"] == 1
+
+            export_response = await client.post(f"/api/retrieval/requests/{request_id}/export")
+            assert export_response.status_code == 200
+            exported_payload = export_response.json()
+            assert exported_payload["request_id"] == request_id
+            assert exported_payload["manifest"]["manifest_id"] == manifest_id
+
+            import_response = await client.post("/api/retrieval/import", json={"manifest_path": manifest_path})
+            assert import_response.status_code == 200
+            imported_payload = import_response.json()
+            assert imported_payload["request_id"] == request_id
+            assert imported_payload["manifest"]["manifest_id"] == manifest_id
+            assert imported_payload["retrieval"]["request_id"] == request_id
+            assert imported_payload["retrieval"]["hit_count"] == 1
 
             resources_response = await client.get("/mcp/v1/resources")
             assert resources_response.status_code == 200
@@ -505,11 +571,46 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert get_tool_payload["request_id"] == request_id
             assert get_tool_payload["result"]["evidence_packet"]["document_count"] == 1
 
+            export_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "export_blast_retrieval_bundle",
+                        "arguments": {"request_id": request_id},
+                    },
+                },
+            )
+            assert export_tool_response.status_code == 200
+            export_tool_payload = json.loads(export_tool_response.json()["result"]["content"][0]["text"])
+            assert export_tool_payload["request_id"] == request_id
+            assert export_tool_payload["manifest"]["manifest_id"] == manifest_id
+
+            import_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "import_blast_retrieval_bundle",
+                        "arguments": {"manifest_path": manifest_path},
+                    },
+                },
+            )
+            assert import_tool_response.status_code == 200
+            import_tool_payload = json.loads(import_tool_response.json()["result"]["content"][0]["text"])
+            assert import_tool_payload["request_id"] == request_id
+            assert import_tool_payload["manifest"]["manifest_id"] == manifest_id
+            assert import_tool_payload["retrieval"]["request_id"] == request_id
+
             resource_read_response = await client.post(
                 "/mcp",
                 json={
                     "jsonrpc": "2.0",
-                    "id": 3,
+                    "id": 6,
                     "method": "resources/read",
                     "params": {"uri": f"retrieval://{request_id}"},
                 },

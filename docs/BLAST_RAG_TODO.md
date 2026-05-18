@@ -26,23 +26,23 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 complete; Milestone 5 local provider + bridge scaffolding in progress
+- **Status**: Milestone 4 complete; Milestone 5 local provider + parquet portability in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
 - **Current milestone**: Milestone 5 (initial slice) in progress
-- **Next in-progress task**: Add export/import path for retrieval data as Parquet bundles
+- **Next in-progress task**: Add optional manifest fields for IPFS CID/CAR references
 - **Primary edit targets**:
   - `mcp-server/retrieval_store.py`
-  - `mcp-server/retrieval_service.py`
   - `mcp-server/retrieval_bridge_daemon.py`
-  - `tests/test_blast_retrieval_config.py`
+  - `mcp-server/server.py`
+  - `tests/test_retrieval_bridge_daemon.py`
   - `docs/BLAST_RAG_TODO.md`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - none
 - **Recommended first implementation slice**:
-  1. add explicit export/import workflows for Parquet retrieval bundles
+  1. add optional CID/CAR references to dataset manifests while keeping publication optional
   2. wire queued bridge requests from retrieval manifests into the ipfs bridge daemon command templates
-  3. add optional CID/CAR manifest fields without making IPFS publication mandatory
+  3. document remote vs local BLAST+ selection for reproducible offline usage
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -161,7 +161,7 @@ Goal: support reproducible offline workflows after the remote path is stable.
 
 - [x] Add local BLAST+ provider interface
 - [x] Define local database configuration and discovery rules
-- [ ] Add export/import path for retrieval data as Parquet bundles
+- [x] Add export/import path for retrieval data as Parquet bundles
 - [x] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
 - [ ] Add optional manifest fields for IPFS CID/CAR references
 - [ ] Document when to choose remote BLAST vs local BLAST+
@@ -181,8 +181,9 @@ If a new session needs an unambiguous place to start, work top-down through this
 2. [x] Add dashboard tests for retrieval settings and evidence rendering
 3. [x] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
 4. [x] Add local BLAST+ provider support after the remote evidence path is stable
-5. [ ] Add export/import path for retrieval data as Parquet bundles
-6. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
+5. [x] Add export/import path for retrieval data as Parquet bundles
+6. [ ] Add optional manifest fields for IPFS CID/CAR references
+7. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
 
 ---
 
@@ -190,14 +191,14 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: implement local BLAST+ provider execution plus runtime config/discovery rules
-- **Next recommended task**: add Parquet retrieval export/import workflows and optional manifest CID/CAR fields
+- **Last completed task**: add explicit retrieval Parquet export/import APIs (service/store, REST, MCP tool paths)
+- **Next recommended task**: add optional manifest CID/CAR fields and bridge wiring hooks for publication workflows
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-server/retrieval_provider.py`
-  - `mcp-server/runtime_config.py`
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_service.py`
+  - `mcp-server/server.py`
   - `mcp-server/retrieval_bridge_daemon.py`
   - `tests/test_blast_retrieval_config.py`
   - `tests/test_retrieval_bridge_daemon.py`

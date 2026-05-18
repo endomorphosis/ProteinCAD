@@ -349,6 +349,12 @@ Planned additions:
 - Add optional mirroring and publication workflows for curated corpora.
 - Export retrieval datasets as Parquet bundles and optionally publish them through IPFS-backed manifests.
 
+Current implementation status:
+
+- Local BLAST+ provider and local database discovery are implemented.
+- Retrieval Parquet bundle export/import paths are available via retrieval service/store APIs and exposed through REST/MCP endpoints.
+- IPFS publication references (CID/CAR fields) remain optional follow-up work.
+
 ### Exit criteria
 
 - provider abstraction supports both remote and local BLAST

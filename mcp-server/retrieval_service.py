@@ -228,6 +228,33 @@ class BlastRetrievalService:
     def list_dataset_manifests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
         return self._store.list_dataset_manifests(limit=limit)
 
+    def export_request_parquet_bundle(self, request_id: str) -> Dict[str, Any]:
+        self._store.ensure_schema()
+        payload = self._store.get_request_result(request_id)
+        if not payload:
+            raise RetrievalConfigError(f"BLAST retrieval request not found: {request_id}")
+        runs = list(payload.get("runs") or [])
+        latest_run = runs[-1] if runs else {}
+        provider = str(payload.get("provider") or latest_run.get("provider") or self._provider.provider_name)
+        return self._store.export_request_parquet_bundle(
+            request_id=request_id,
+            run_id=latest_run.get("run_id"),
+            provider=provider,
+            source_system="ncbi_blast",
+            transform_version=EVIDENCE_TRANSFORM_VERSION,
+        )
+
+    def import_parquet_bundle(self, manifest_path: str) -> Dict[str, Any]:
+        self._store.ensure_schema()
+        manifest = self._store.import_request_parquet_bundle(manifest_path=manifest_path)
+        request_id = str(manifest.get("request_id") or "").strip()
+        if not request_id:
+            raise RetrievalConfigError("Imported retrieval manifest did not include request_id")
+        result = self.get_request_result(request_id)
+        if not result:
+            raise RetrievalConfigError(f"Imported retrieval request not found after import: {request_id}")
+        return {"request_id": request_id, "manifest": manifest, "result": result}
+
     def _with_evidence_packet(self, result: Dict[str, Any]) -> Dict[str, Any]:
         evidence_documents = list(result.get("evidence_documents") or [])
         packet_documents = []
