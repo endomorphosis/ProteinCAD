@@ -589,10 +589,15 @@ def _apply_runtime_env_overrides(cfg: MCPServerConfig) -> bool:
 
 class RuntimeConfigManager:
     def __init__(self, path: Optional[str] = None):
-        self.path = Path(path) if path else Path(os.getenv("MCP_CONFIG_PATH", "").strip() or "")
+        configured_path = (path.strip() if isinstance(path, str) else "") or os.getenv("MCP_CONFIG_PATH", "").strip()
+        self.path = Path(configured_path) if configured_path else Path()
+        self._has_config_path = bool(configured_path)
         self._config = MCPServerConfig()
         self._revision = 0
-        bootstrap_changed = _apply_runtime_default_overrides(self._config, self.path if self.path else None)
+        bootstrap_changed = _apply_runtime_default_overrides(
+            self._config,
+            self.path if self._has_config_path else None,
+        )
         if bootstrap_changed:
             self._revision += 1
         self._load_from_disk_if_present()
@@ -600,7 +605,7 @@ class RuntimeConfigManager:
         # Ensure there's always a persisted config file when MCP_CONFIG_PATH is set.
         # This makes the dashboard settings editable out-of-the-box.
         try:
-            if self.path and not self.path.exists() and self._config.allow_runtime_updates:
+            if self._has_config_path and not self.path.exists() and self._config.allow_runtime_updates:
                 self._persist()
                 self._revision += 1
         except Exception:
@@ -614,13 +619,16 @@ class RuntimeConfigManager:
         return self._config
 
     def _load_from_disk_if_present(self) -> None:
-        if not self.path:
+        if not self._has_config_path:
             return
         try:
             if not self.path.exists():
                 return
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            migration = _migrate_persisted_config_data(data, self.path if self.path else None)
+            migration = _migrate_persisted_config_data(
+                data,
+                self.path if self._has_config_path else None,
+            )
             self._config = MCPServerConfig.model_validate(migration.data)
 
             config_changed = True

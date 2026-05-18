@@ -732,6 +732,8 @@ class RetrievalStore:
 
     def get_request_result(self, request_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
+            if not self._duckdb_path().exists():
+                return None
             with self._connect(read_only=True) as conn:
                 request_cur = conn.execute(
                     """

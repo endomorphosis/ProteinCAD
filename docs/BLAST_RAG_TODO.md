@@ -147,7 +147,7 @@ Goal: expose retrieval controls and evidence visually.
 - [x] Add evidence browser/table for BLAST hits
 - [x] Add summary cards for top homologs and cache state
 - [x] Add UI toggle for “ground this design with BLAST evidence”
-- [ ] Add dashboard tests for settings and evidence rendering
+- [x] Add dashboard tests for settings and evidence rendering
 
 ### Exit criteria
 
@@ -178,7 +178,7 @@ Goal: support reproducible offline workflows after the remote path is stable.
 If a new session needs an unambiguous place to start, work top-down through this list:
 
 1. [x] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
-2. [ ] Add dashboard tests for retrieval settings and evidence rendering
+2. [x] Add dashboard tests for retrieval settings and evidence rendering
 3. [ ] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
 4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
 5. [ ] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them
@@ -189,8 +189,8 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: wire per-job BLAST grounding toggle + retrieval status/evidence browser into dashboard and thread retrieval bundles into completed job results
-- **Next recommended task**: expand dashboard retrieval e2e coverage and tighten normalized retrieval contract assertions
+- **Last completed task**: add dashboard retrieval e2e coverage for settings, grounding badges, and evidence rendering paths
+- **Next recommended task**: harden retrieval contract/evidence wiring based on dashboard + MCP review feedback
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-dashboard/components/ProteinSequenceForm.tsx`

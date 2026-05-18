@@ -663,6 +663,23 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                         "type": "integer",
                         "description": "Number of binder designs to generate",
                         "default": 5
+                    },
+                    "ground_with_blast_evidence": {
+                        "type": "boolean",
+                        "description": "When true, opt-in to BLAST retrieval grounding for this design job",
+                        "default": False
+                    },
+                    "retrieval_program": {
+                        "type": "string",
+                        "description": "Optional BLAST program override for this job"
+                    },
+                    "retrieval_database": {
+                        "type": "string",
+                        "description": "Optional BLAST database override for this job"
+                    },
+                    "retrieval_hitlist_size": {
+                        "type": "integer",
+                        "description": "Optional BLAST hitlist size override for this job"
                     }
                 },
                 "required": ["sequence"]
