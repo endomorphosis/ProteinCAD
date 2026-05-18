@@ -178,6 +178,57 @@ async function copyTextToClipboard(text: string) {
   }
 }
 
+function extractRetrievalBundle(payload: any): RetrievalBundle | null {
+  if (!payload || typeof payload !== 'object') return null
+  if (payload.request_id && (payload.top_hits || payload.evidence_summary || payload.status || payload.result)) {
+    return payload as RetrievalBundle
+  }
+  if (payload.result && typeof payload.result === 'object') {
+    const nested = payload.result
+    if (nested.request_id || nested.top_hits || nested.evidence_summary || nested.dataset_manifests) {
+      return {
+        ...(payload as RetrievalBundle),
+        result: nested,
+      }
+    }
+  }
+  return null
+}
+
+function normalizeResourcePreview(payload: any): { preview: any; bundle: RetrievalBundle | null } {
+  const directBundle = extractRetrievalBundle(payload)
+  if (directBundle) {
+    return { preview: payload, bundle: directBundle }
+  }
+
+  const contents = Array.isArray(payload?.contents) ? payload.contents : []
+  if (contents.length === 0) {
+    return { preview: payload, bundle: null }
+  }
+
+  const first = contents[0]
+  const text = typeof first?.text === 'string' ? first.text : ''
+  if (!text) {
+    return { preview: payload, bundle: null }
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    return {
+      preview: {
+        resource: {
+          uri: first?.uri,
+          mimeType: first?.mimeType,
+        },
+        payload: parsed,
+      },
+      bundle: extractRetrievalBundle(parsed),
+    }
+  } catch {
+    return { preview: payload, bundle: null }
+  }
+}
+
 export default function ResultsViewer({ job, onIterate }: Props) {
   const [expandedDesign, setExpandedDesign] = useState<number | null>(0)
   const [show3DViewer, setShow3DViewer] = useState(false)
@@ -187,6 +238,7 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   const [library, setLibrary] = useState<DesignLibraryItem[]>([])
   const [hitSort, setHitSort] = useState<'rank' | 'score' | 'evalue'>('rank')
   const [resourcePreview, setResourcePreview] = useState<string | null>(null)
+  const [resourceBundle, setResourceBundle] = useState<RetrievalBundle | null>(null)
 
   useEffect(() => {
     const refresh = () => setLibrary(loadDesignLibrary())
@@ -194,6 +246,11 @@ export default function ResultsViewer({ job, onIterate }: Props) {
     window.addEventListener('design-library-updated', refresh)
     return () => window.removeEventListener('design-library-updated', refresh)
   }, [])
+
+  useEffect(() => {
+    setResourcePreview(null)
+    setResourceBundle(null)
+  }, [job.job_id])
 
   const inputSequence = typeof job.input?.sequence === 'string' ? job.input.sequence : ''
 
@@ -237,8 +294,9 @@ export default function ResultsViewer({ job, onIterate }: Props) {
     if (fromJob && typeof fromJob === 'object') return fromJob as RetrievalBundle
     const fromResults = (job.results as any)?.retrieval
     if (fromResults && typeof fromResults === 'object') return fromResults as RetrievalBundle
+    if (resourceBundle && typeof resourceBundle === 'object') return resourceBundle
     return null
-  }, [job.retrieval?.result, job.results])
+  }, [job.retrieval?.result, job.results, resourceBundle])
   const retrievalHits = useMemo(() => {
     const hits = retrievalBundle?.top_hits || []
     const ranked = [...hits]
@@ -370,8 +428,22 @@ export default function ResultsViewer({ job, onIterate }: Props) {
               {retrievalBundle?.request_id && (
                 <button
                   onClick={async () => {
-                    const payload = await mcpClient.readResource(`retrieval://${retrievalBundle.request_id}`)
-                    setResourcePreview(JSON.stringify(payload, null, 2))
+                    try {
+                      const payload = await mcpClient.readResource(`retrieval://${retrievalBundle.request_id}`)
+                      const normalized = normalizeResourcePreview(payload)
+                      setResourcePreview(JSON.stringify(normalized.preview, null, 2))
+                      setResourceBundle(normalized.bundle)
+                    } catch (error: any) {
+                      setResourcePreview(
+                        JSON.stringify(
+                          {
+                            error: error?.message || 'Failed to load retrieval resource',
+                          },
+                          null,
+                          2
+                        )
+                      )
+                    }
                   }}
                   className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
                 >
