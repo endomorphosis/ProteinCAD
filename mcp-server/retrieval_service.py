@@ -228,6 +228,26 @@ class BlastRetrievalService:
     def list_dataset_manifests(self, *, limit: int = 100) -> list[Dict[str, Any]]:
         return self._store.list_dataset_manifests(limit=limit)
 
+    def set_manifest_publication(
+        self,
+        manifest_id: str,
+        *,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update IPFS CID/CAR publication fields on a manifest.
+
+        Returns the updated manifest row or None if not found.
+        """
+        self._store.ensure_schema()
+        return self._store.set_manifest_publication(
+            manifest_id,
+            ipfs_cid=ipfs_cid,
+            ipfs_car_path=ipfs_car_path,
+            publication_status=publication_status,
+        )
+
     def export_request_parquet_bundle(self, request_id: str) -> Dict[str, Any]:
         self._store.ensure_schema()
         payload = self._store.get_request_result(request_id)

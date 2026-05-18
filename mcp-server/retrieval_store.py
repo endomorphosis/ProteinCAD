@@ -19,7 +19,7 @@ from runtime_config import RetrievalConfig
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_STATEMENTS = (
     # Latest schema definition for fresh databases.
@@ -151,7 +151,10 @@ SCHEMA_STATEMENTS = (
         parquet_path VARCHAR,
         raw_payload_dir VARCHAR,
         manifest_json TEXT,
-        created_at TIMESTAMP NOT NULL
+        created_at TIMESTAMP NOT NULL,
+        ipfs_cid VARCHAR,
+        ipfs_car_path VARCHAR,
+        publication_status VARCHAR
     )
     """,
 )
@@ -166,6 +169,10 @@ MIGRATION_STATEMENTS = (
     "ALTER TABLE evidence_documents ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP",
     "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS request_id VARCHAR",
     "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS run_id VARCHAR",
+    # Schema version 4 -> 5: optional IPFS publication references on dataset manifests.
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS ipfs_cid VARCHAR",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS ipfs_car_path VARCHAR",
+    "ALTER TABLE dataset_manifests ADD COLUMN IF NOT EXISTS publication_status VARCHAR",
 )
 
 
@@ -214,7 +221,7 @@ class RetrievalStore:
                     VALUES (?, ?, ?)
                     ON CONFLICT DO NOTHING
                     """,
-                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment and parquet exports", _utcnow()],
+                    [SCHEMA_VERSION, "BLAST retrieval schema with evidence enrichment, parquet exports, and IPFS publication fields", _utcnow()],
                 )
             self.initialized = True
             self.last_error = None
@@ -475,6 +482,9 @@ class RetrievalStore:
         parquet_path: str,
         raw_payload_dir: str,
         manifest_json: str,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
     ) -> None:
         with self._lock:
             with self._connect() as conn:
@@ -482,9 +492,9 @@ class RetrievalStore:
                     """
                     INSERT INTO dataset_manifests (
                         manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                        raw_payload_dir, manifest_json, created_at
+                        raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (manifest_id) DO UPDATE SET
                         request_id = excluded.request_id,
                         run_id = excluded.run_id,
@@ -494,7 +504,10 @@ class RetrievalStore:
                         parquet_path = excluded.parquet_path,
                         raw_payload_dir = excluded.raw_payload_dir,
                         manifest_json = excluded.manifest_json,
-                        created_at = excluded.created_at
+                        created_at = excluded.created_at,
+                        ipfs_cid = COALESCE(excluded.ipfs_cid, dataset_manifests.ipfs_cid),
+                        ipfs_car_path = COALESCE(excluded.ipfs_car_path, dataset_manifests.ipfs_car_path),
+                        publication_status = COALESCE(excluded.publication_status, dataset_manifests.publication_status)
                     """,
                     [
                         manifest_id,
@@ -507,6 +520,9 @@ class RetrievalStore:
                         raw_payload_dir,
                         manifest_json,
                         _utcnow(),
+                        ipfs_cid,
+                        ipfs_car_path,
+                        publication_status,
                     ],
                 )
 
@@ -660,6 +676,9 @@ class RetrievalStore:
             "annotation_count": int(count_row[3] or 0),
             "evidence_count": int(count_row[4] or 0),
             "created_at": _utcnow().isoformat(),
+            "ipfs_cid": None,
+            "ipfs_car_path": None,
+            "publication_status": None,
         }
         manifest_json = json.dumps(manifest, sort_keys=True)
         temp_manifest_path.write_text(manifest_json, encoding="utf-8")
@@ -1080,7 +1099,7 @@ class RetrievalStore:
                 manifest_cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     WHERE request_id = ?
                     ORDER BY created_at ASC
@@ -1167,7 +1186,7 @@ class RetrievalStore:
                 cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     WHERE manifest_id = ?
                     """,
@@ -1190,7 +1209,7 @@ class RetrievalStore:
                 cur = conn.execute(
                     """
                     SELECT manifest_id, request_id, run_id, provider, source_system, transform_version, parquet_path,
-                           raw_payload_dir, manifest_json, created_at
+                           raw_payload_dir, manifest_json, created_at, ipfs_cid, ipfs_car_path, publication_status
                     FROM dataset_manifests
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -1203,6 +1222,65 @@ class RetrievalStore:
                     if isinstance(manifest.get("manifest_json"), str):
                         manifest["manifest"] = json.loads(manifest.pop("manifest_json"))
                 return manifests
+
+    def set_manifest_publication(
+        self,
+        manifest_id: str,
+        *,
+        ipfs_cid: Optional[str] = None,
+        ipfs_car_path: Optional[str] = None,
+        publication_status: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update IPFS CID/CAR publication fields on an existing manifest row.
+
+        Returns the updated manifest row, or None if the manifest was not found.
+        """
+        with self._lock:
+            if not self._duckdb_path().exists():
+                return None
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT manifest_id FROM dataset_manifests WHERE manifest_id = ?",
+                    [manifest_id],
+                ).fetchone()
+                if not row:
+                    return None
+                if ipfs_cid is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET ipfs_cid = ? WHERE manifest_id = ?",
+                        [ipfs_cid, manifest_id],
+                    )
+                if ipfs_car_path is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET ipfs_car_path = ? WHERE manifest_id = ?",
+                        [ipfs_car_path, manifest_id],
+                    )
+                if publication_status is not None:
+                    conn.execute(
+                        "UPDATE dataset_manifests SET publication_status = ? WHERE manifest_id = ?",
+                        [publication_status, manifest_id],
+                    )
+                # Refresh manifest_json to include the new publication fields.
+                cur = conn.execute(
+                    """
+                    SELECT manifest_json, ipfs_cid, ipfs_car_path, publication_status
+                    FROM dataset_manifests WHERE manifest_id = ?
+                    """,
+                    [manifest_id],
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return None
+                existing_json = json.loads(updated[0]) if isinstance(updated[0], str) else (updated[0] or {})
+                existing_json["ipfs_cid"] = updated[1]
+                existing_json["ipfs_car_path"] = updated[2]
+                existing_json["publication_status"] = updated[3]
+                updated_manifest_json = json.dumps(existing_json, sort_keys=True)
+                conn.execute(
+                    "UPDATE dataset_manifests SET manifest_json = ? WHERE manifest_id = ?",
+                    [updated_manifest_json, manifest_id],
+                )
+        return self.get_dataset_manifest(manifest_id)
 
     def schema_tables(self) -> set[str]:
         with self._lock:

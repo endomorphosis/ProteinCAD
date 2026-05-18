@@ -202,8 +202,8 @@ def test_retrieval_store_initializes_duckdb_schema(tmp_path):
         }
     assert {"run_id", "hit_rank", "source_system", "source_id", "retrieved_at"} <= evidence_columns
     versions = store.migration_versions()
-    assert 4 in versions
-    assert max(versions) == 4
+    assert 5 in versions
+    assert max(versions) == 5
 
 
 def test_retrieval_store_skips_schema_when_disabled(tmp_path):
@@ -470,6 +470,67 @@ def test_retrieval_service_imports_parquet_bundle_into_fresh_store(tmp_path):
     assert any(entry["request_id"] == source_result.request_id for entry in cache_entries)
 
 
+def test_set_manifest_publication_updates_cid_and_car_fields(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.feature_flags.evidence_enrichment = True
+    cfg.retrieval.feature_flags.export_parquet = True
+    cfg.retrieval.storage.data_dir = str(tmp_path / "retrieval")
+    cfg.retrieval.storage.duckdb_path = str(tmp_path / "retrieval" / "blast_retrieval.duckdb")
+    cfg.retrieval.storage.parquet_export_dir = str(tmp_path / "retrieval" / "parquet")
+    cfg.retrieval.storage.raw_payload_dir = str(tmp_path / "retrieval" / "raw_payloads")
+    cfg.retrieval.storage.manifest_dir = str(tmp_path / "retrieval" / "manifests")
+    handler, _ = _mock_blast_handler()
+    store = RetrievalStore(cfg.retrieval)
+    service = BlastRetrievalService(
+        config=cfg.retrieval,
+        store=store,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _: asyncio.sleep(0),
+    )
+    result = asyncio.run(service.retrieve(TEST_FASTA_QUERY))
+    manifest = service.export_request_parquet_bundle(result.request_id)
+    manifest_id = manifest["manifest_id"]
+
+    # Verify initial state has no publication fields set.
+    raw = service.get_dataset_manifest(manifest_id)
+    assert raw is not None
+    assert raw.get("ipfs_cid") is None
+    assert raw.get("ipfs_car_path") is None
+    assert raw.get("publication_status") is None
+
+    # Update CID/CAR/status and verify persistence.
+    updated = service.set_manifest_publication(
+        manifest_id,
+        ipfs_cid="bafybeiabc123",
+        ipfs_car_path="/exports/bundle.car",
+        publication_status="published",
+    )
+    assert updated is not None
+    assert updated["ipfs_cid"] == "bafybeiabc123"
+    assert updated["ipfs_car_path"] == "/exports/bundle.car"
+    assert updated["publication_status"] == "published"
+    # Verify the manifest_json inline field was also refreshed.
+    assert updated["manifest"]["ipfs_cid"] == "bafybeiabc123"
+    assert updated["manifest"]["publication_status"] == "published"
+
+    # Idempotent partial update should not overwrite fields not passed.
+    partial = service.set_manifest_publication(manifest_id, publication_status="verified")
+    assert partial is not None
+    assert partial["ipfs_cid"] == "bafybeiabc123"
+    assert partial["publication_status"] == "verified"
+
+    # Not-found case returns None.
+    missing = service.set_manifest_publication("nonexistent_manifest_id", ipfs_cid="bafy123")
+    assert missing is None
+
+    # Fields should appear in the list manifests response too.
+    listed = service.list_dataset_manifests()
+    found = next((m for m in listed if m["manifest_id"] == manifest_id), None)
+    assert found is not None
+    assert found["ipfs_cid"] == "bafybeiabc123"
+
+
 def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
     handler, request_counts = _mock_blast_handler()
     server = _configure_and_reset_server_for_retrieval(tmp_path, handler, export_parquet=True)
@@ -485,6 +546,7 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
                 "get_blast_retrieval",
                 "export_blast_retrieval_bundle",
                 "import_blast_retrieval_bundle",
+                "set_retrieval_manifest_publication",
             } <= tool_names
 
             create_response = await client.post(
@@ -607,6 +669,56 @@ def test_retrieval_rest_and_mcp_endpoints_expose_evidence(tmp_path):
             assert import_tool_payload["request_id"] == request_id
             assert import_tool_payload["manifest"]["manifest_id"] == manifest_id
             assert import_tool_payload["retrieval"]["request_id"] == request_id
+
+            # REST GET/PATCH for manifest publication fields.
+            get_manifests_response = await client.get("/api/retrieval/manifests")
+            assert get_manifests_response.status_code == 200
+            manifests_list = get_manifests_response.json()["manifests"]
+            assert any(m["manifest_id"] == manifest_id for m in manifests_list)
+
+            get_manifest_response = await client.get(f"/api/retrieval/manifests/{manifest_id}")
+            assert get_manifest_response.status_code == 200
+            manifest_row = get_manifest_response.json()
+            assert manifest_row["manifest_id"] == manifest_id
+            assert manifest_row.get("ipfs_cid") is None
+
+            patch_response = await client.patch(
+                f"/api/retrieval/manifests/{manifest_id}",
+                json={"ipfs_cid": "bafytest123", "publication_status": "published"},
+            )
+            assert patch_response.status_code == 200
+            patched = patch_response.json()
+            assert patched["ipfs_cid"] == "bafytest123"
+            assert patched["publication_status"] == "published"
+
+            # MCP tool for publication update.
+            pub_tool_response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "set_retrieval_manifest_publication",
+                        "arguments": {
+                            "manifest_id": manifest_id,
+                            "ipfs_cid": "bafytest_updated",
+                            "publication_status": "verified",
+                        },
+                    },
+                },
+            )
+            assert pub_tool_response.status_code == 200
+            pub_tool_payload = json.loads(pub_tool_response.json()["result"]["content"][0]["text"])
+            assert pub_tool_payload["ipfs_cid"] == "bafytest_updated"
+            assert pub_tool_payload["publication_status"] == "verified"
+
+            # Not-found case returns an error payload.
+            notfound_patch = await client.patch(
+                "/api/retrieval/manifests/nonexistent_manifest",
+                json={"ipfs_cid": "bafy999"},
+            )
+            assert notfound_patch.status_code == 404
 
             resource_read_response = await client.post(
                 "/mcp",

@@ -26,10 +26,10 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 complete; Milestone 5 local provider + parquet portability in progress
+- **Status**: Milestone 5 complete
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
-- **Current milestone**: Milestone 5 (initial slice) in progress
-- **Next in-progress task**: Add optional manifest fields for IPFS CID/CAR references
+- **Current milestone**: Milestone 5 complete
+- **Next in-progress task**: None — all Milestone 5 items are done; begin Milestone 6 scoping if needed
 - **Primary edit targets**:
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_bridge_daemon.py`
@@ -39,10 +39,10 @@ If the snapshot is stale, update it before starting implementation work.
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - none
-- **Recommended first implementation slice**:
-  1. add optional CID/CAR references to dataset manifests while keeping publication optional
-  2. wire queued bridge requests from retrieval manifests into the ipfs bridge daemon command templates
-  3. document remote vs local BLAST+ selection for reproducible offline usage
+- **Recommended next slice** (if scope continues):
+  1. Add a `retrieval_bridge_watch` script that polls completed bridge result files and calls `set_manifest_publication` on the store to keep DuckDB in sync after bridge jobs finish
+  2. Consider adding a vector-embedding adjunct to the evidence store for semantic search
+  3. Add rate-limit guards or back-off to the local BLAST+ provider for bulk job parallelism
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -163,8 +163,8 @@ Goal: support reproducible offline workflows after the remote path is stable.
 - [x] Define local database configuration and discovery rules
 - [x] Add export/import path for retrieval data as Parquet bundles
 - [x] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
-- [ ] Add optional manifest fields for IPFS CID/CAR references
-- [ ] Document when to choose remote BLAST vs local BLAST+
+- [x] Add optional manifest fields for IPFS CID/CAR references
+- [x] Document when to choose remote BLAST vs local BLAST+
 
 ### Exit criteria
 
@@ -182,8 +182,9 @@ If a new session needs an unambiguous place to start, work top-down through this
 3. [x] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
 4. [x] Add local BLAST+ provider support after the remote evidence path is stable
 5. [x] Add export/import path for retrieval data as Parquet bundles
-6. [ ] Add optional manifest fields for IPFS CID/CAR references
+6. [x] Add optional manifest fields for IPFS CID/CAR references
 7. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
+8. [x] Document when to choose remote BLAST vs local BLAST+
 
 ---
 
@@ -191,11 +192,10 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: add explicit retrieval Parquet export/import APIs (service/store, REST, MCP tool paths)
-- **Next recommended task**: add optional manifest CID/CAR fields and bridge wiring hooks for publication workflows
+- **Last completed task**: add optional IPFS CID/CAR manifest fields, bridge daemon back-annotation for publication results, REST/MCP publication endpoints, and remote vs local BLAST+ selection documentation
+- **Next recommended task**: Milestone 5 is complete. If scope continues, consider: (1) bridge watch script to sync DuckDB with completed bridge result CIDs, (2) evidence semantic search via embeddings, or (3) rate-limit guards for local BLAST+ bulk jobs
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
-  - `mcp-server/retrieval_provider.py`
   - `mcp-server/retrieval_store.py`
   - `mcp-server/retrieval_service.py`
   - `mcp-server/server.py`
@@ -209,7 +209,6 @@ Use this block at the end of each Copilot session. Replace the placeholders inst
   - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_retrieval_bridge_daemon.py`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run lint`
   - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && npm run build`
-  - `cd /home/runner/work/ProteinCAD/ProteinCAD/mcp-dashboard && E2E_PORT=3401 npm run test:e2e`
   - `pytest /home/runner/work/ProteinCAD/ProteinCAD/tests/test_blast_retrieval_config.py`
   - `docker build -t test-mcp-server /home/runner/work/ProteinCAD/ProteinCAD/mcp-server`
 

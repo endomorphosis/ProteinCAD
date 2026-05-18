@@ -531,6 +531,14 @@ class RetrievalParquetImportInput(BaseModel):
     manifest_path: str = Field(..., description="Path to a retrieval Parquet manifest JSON")
 
 
+class ManifestPublicationInput(BaseModel):
+    ipfs_cid: Optional[str] = Field(None, description="IPFS content identifier (CID) for the published bundle")
+    ipfs_car_path: Optional[str] = Field(None, description="Local path to the exported CAR archive")
+    publication_status: Optional[str] = Field(
+        None, description="Publication lifecycle state (e.g. pending, published, failed)"
+    )
+
+
 # AlphaFold optimization settings
 class AlphaFoldOptimizationSettings(BaseModel):
     speed_preset: Optional[str] = Field(
@@ -897,6 +905,20 @@ async def list_tools() -> Dict[str, List[ToolInfo]]:
                         "required": ["manifest_path"],
                     },
                 ),
+                ToolInfo(
+                    name="set_retrieval_manifest_publication",
+                    description="Set IPFS CID/CAR path and publication status on a retrieval dataset manifest",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "manifest_id": {"type": "string", "description": "Manifest ID to update"},
+                            "ipfs_cid": {"type": "string", "description": "IPFS CID for the published bundle"},
+                            "ipfs_car_path": {"type": "string", "description": "Local path to exported CAR archive"},
+                            "publication_status": {"type": "string", "description": "Publication lifecycle state"},
+                        },
+                        "required": ["manifest_id"],
+                    },
+                ),
             ]
         )
     return {"tools": tools}
@@ -1089,6 +1111,28 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(payload, indent=2, default=str)}], "isError": False},
+                )
+
+            if name == "set_retrieval_manifest_publication":
+                try:
+                    _ensure_retrieval_mcp_enabled()
+                except RuntimeError:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval MCP tools are disabled")
+                manifest_id = arguments.get("manifest_id")
+                if not manifest_id:
+                    return _jsonrpc_error(msg_id, -32602, "Missing manifest_id")
+                updated = await asyncio.to_thread(
+                    app.state.retrieval_service.set_manifest_publication,
+                    manifest_id,
+                    ipfs_cid=arguments.get("ipfs_cid"),
+                    ipfs_car_path=arguments.get("ipfs_car_path"),
+                    publication_status=arguments.get("publication_status"),
+                )
+                if not updated:
+                    return _jsonrpc_error(msg_id, -32000, "Retrieval manifest not found")
+                return _jsonrpc_result(
+                    msg_id,
+                    {"content": [{"type": "text", "text": json.dumps(updated, indent=2, default=str)}], "isError": False},
                 )
 
             if name == "design_protein_binder":
@@ -1464,6 +1508,43 @@ async def import_retrieval_bundle(input_data: RetrievalParquetImportInput) -> Di
         "manifest": imported.get("manifest"),
         "retrieval": normalized,
     }
+
+
+@app.get("/api/retrieval/manifests")
+async def list_retrieval_manifests(limit: int = Query(100, ge=1, le=1000)) -> Dict[str, Any]:
+    """List dataset manifests for BLAST retrieval bundles."""
+    _ensure_retrieval_rest_enabled()
+    manifests = await asyncio.to_thread(app.state.retrieval_service.list_dataset_manifests, limit=limit)
+    return {"manifests": manifests}
+
+
+@app.get("/api/retrieval/manifests/{manifest_id}")
+async def get_retrieval_manifest(manifest_id: str) -> Dict[str, Any]:
+    """Get a dataset manifest by manifest ID."""
+    _ensure_retrieval_rest_enabled()
+    manifest = await asyncio.to_thread(app.state.retrieval_service.get_dataset_manifest, manifest_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail="Retrieval manifest not found")
+    return manifest
+
+
+@app.patch("/api/retrieval/manifests/{manifest_id}")
+async def update_manifest_publication(
+    manifest_id: str,
+    input_data: ManifestPublicationInput,
+) -> Dict[str, Any]:
+    """Update IPFS CID/CAR path and publication status on a retrieval dataset manifest."""
+    _ensure_retrieval_rest_enabled()
+    updated = await asyncio.to_thread(
+        app.state.retrieval_service.set_manifest_publication,
+        manifest_id,
+        ipfs_cid=input_data.ipfs_cid,
+        ipfs_car_path=input_data.ipfs_car_path,
+        publication_status=input_data.publication_status,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Retrieval manifest not found")
+    return updated
 
 
 # Job management endpoints

@@ -183,12 +183,70 @@ def _build_command(request: dict[str, Any], command_template: Optional[str]) -> 
         "manifest_path": str(request.get("manifest_path") or ""),
         "parquet_dir": str(request.get("parquet_dir") or ""),
         "action": str(request.get("action") or ""),
+        # Optional IPFS publication fields (empty by default; populated after a successful publish run).
+        "ipfs_cid": str(request.get("ipfs_cid") or ""),
+        "ipfs_car_path": str(request.get("ipfs_car_path") or ""),
     }
     try:
         rendered = template.format(**mapping)
     except Exception as exc:
         return [], f"Failed to render command template: {exc}"
     return shlex.split(rendered), None
+
+
+def _extract_publication_fields(stdout: str) -> dict[str, Any]:
+    """Parse stdout for a JSON object that contains IPFS CID/CAR fields.
+
+    Bridge commands that publish bundles to IPFS can emit a JSON object to stdout
+    with any of the keys ``ipfs_cid``, ``ipfs_car_path``, or ``publication_status``.
+    This helper extracts those fields so they can be written back to the manifest.
+    Returns an empty dict if no recognised fields are found or stdout is not JSON.
+    """
+    text = (stdout or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        # Scan for the last JSON-looking object in stdout for commands that mix log/JSON output.
+        import re
+
+        json_candidates = re.findall(r"\{[^{}]+\}", text, re.DOTALL)
+        parsed = None
+        for candidate in reversed(json_candidates):
+            try:
+                parsed = json.loads(candidate)
+                break
+            except Exception:
+                continue
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        k: parsed[k]
+        for k in ("ipfs_cid", "ipfs_car_path", "publication_status")
+        if k in parsed and parsed[k]
+    }
+
+
+def _apply_publication_fields_to_manifest(manifest_path: str, fields: dict[str, Any]) -> None:
+    """Patch an on-disk manifest JSON file with IPFS publication fields.
+
+    This is a best-effort operation; any failure is logged and swallowed so that
+    a manifest write error never prevents the result payload from being persisted.
+    """
+    if not fields:
+        return
+    path = Path(manifest_path)
+    if not path.exists():
+        return
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            return
+        existing.update(fields)
+        path.write_text(json.dumps(existing, sort_keys=True), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def run_one_cycle(paths: BridgePaths, *, command_template: Optional[str], timeout_seconds: float) -> dict[str, Any]:
@@ -246,6 +304,16 @@ def run_one_cycle(paths: BridgePaths, *, command_template: Optional[str], timeou
         except Exception as exc:
             error_text = f"Bridge command execution failed: {exc}"
 
+    # If the command succeeded, look for IPFS CID/CAR fields in stdout and
+    # write them back to the manifest file on disk so callers can read them.
+    publication_fields: dict[str, Any] = {}
+    if status == "completed":
+        publication_fields = _extract_publication_fields(stdout)
+        if publication_fields:
+            manifest_path_str = str(request.get("manifest_path") or "")
+            if manifest_path_str:
+                _apply_publication_fields_to_manifest(manifest_path_str, publication_fields)
+
     completed_at = _utcnow()
     result_payload = {
         "schema": "proteincad.retrieval_ipfs_bridge.result.v1",
@@ -259,6 +327,7 @@ def run_one_cycle(paths: BridgePaths, *, command_template: Optional[str], timeou
         "stdout": stdout[-MAX_LOG_CAPTURE_CHARS:],
         "stderr": stderr[-MAX_LOG_CAPTURE_CHARS:],
         "error": error_text,
+        "publication_fields": publication_fields,
     }
 
     destination_dir = paths.queue_completed if status == "completed" else paths.queue_failed

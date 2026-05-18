@@ -438,6 +438,89 @@ That keeps the todo daemon state durable across Copilot sessions without duplica
 
 ---
 
+## Choosing Between Remote BLAST and Local BLAST+
+
+ProteinCAD supports two BLAST provider modes. Use this guide to select the right one.
+
+### Remote NCBI BLAST (`ncbi_blast_remote`)
+
+**When to use:**
+
+- You do not need to install or maintain a local BLAST+ binary and databases.
+- Your sequences are short to moderate in length and NCBI rate-limit tolerance is acceptable.
+- You want immediate results from a well-maintained, up-to-date NCBI database (`nr`, `refseq_protein`, `swissprot`, etc.).
+- You are prototyping or doing interactive design sessions where occasional latency is acceptable.
+- Network access to `https://blast.ncbi.nlm.nih.gov/` is available from the deployment environment.
+
+**Tradeoffs:**
+
+- Subject to NCBI rate limits and queue depth — large batches can take many minutes or be rejected.
+- Results depend on NCBI database update schedules, not a locally pinned dataset version.
+- Requires outbound HTTPS access; not suitable for air-gapped or highly restricted networks.
+
+**Configuration:**
+
+```env
+MCP_RETRIEVAL_PROVIDER=ncbi_blast_remote
+MCP_RETRIEVAL_REMOTE_BASE_URL=https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi   # default
+MCP_RETRIEVAL_DATABASE=nr                                                         # default
+MCP_RETRIEVAL_PROGRAM=blastp                                                      # default
+```
+
+---
+
+### Local BLAST+ (`local_blast`)
+
+**When to use:**
+
+- You are running in an air-gapped or latency-sensitive environment.
+- You need reproducible, version-pinned results against a specific database snapshot.
+- You are running bulk jobs where NCBI rate limits would make remote submission impractical.
+- You need to use custom, private, or curated local sequence databases.
+- You want to avoid network round-trips in CI or automated pipelines.
+
+**Requirements:**
+
+- BLAST+ suite installed (`blastp`, `blastx`, etc. available on `$PATH` or at a configured path).
+- A pre-formatted local BLAST database accessible from the deployment host.
+- Sufficient storage for database files (e.g. NR is ~250 GB in BLAST format).
+
+**Tradeoffs:**
+
+- Database is only as current as your last local update (`update_blastdb.pl` or equivalent).
+- You own the maintenance and storage of the local database.
+- No concurrency limiting is applied by the provider itself — you should cap job parallelism at the call site.
+
+**Configuration:**
+
+```env
+MCP_RETRIEVAL_PROVIDER=local_blast
+MCP_RETRIEVAL_LOCAL_BLAST_BINARY=blastp         # or path to binary
+MCP_RETRIEVAL_LOCAL_DATABASE=nr                 # database name
+MCP_RETRIEVAL_LOCAL_DATABASE_DIR=/data/blastdb  # directory containing database files
+# Or use a glob to auto-discover the first matching database file:
+MCP_RETRIEVAL_LOCAL_DATABASE_GLOB=/data/blastdb/*.pal
+```
+
+---
+
+### Summary Decision Matrix
+
+| Criterion | Remote NCBI BLAST | Local BLAST+ |
+|---|---|---|
+| Air-gapped / offline | ✗ | ✓ |
+| Reproducible database version | ✗ | ✓ |
+| No installation required | ✓ | ✗ |
+| Up-to-date NCBI database | ✓ | Only if manually updated |
+| Low latency for interactive use | Depends on queue | ✓ |
+| Large batch throughput | Limited by rate limits | ✓ |
+| Custom / private databases | ✗ | ✓ |
+| Default for new deployments | ✓ | Opt-in |
+
+For most interactive and low-volume deployment scenarios, remote NCBI BLAST is the recommended starting point. Migrate to local BLAST+ when reproducibility, latency, or rate-limit requirements make the remote path impractical.
+
+---
+
 ## Reliability, Compliance, and Safety
 
 ### Remote service limits
