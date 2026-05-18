@@ -9,8 +9,11 @@ function toolResult(textObj: any) {
 }
 
 test.describe('Settings + utility buttons', () => {
+  let putConfigPayloads: any[] = []
+
   test.beforeEach(async ({ page }) => {
     await installMockEventSource(page)
+    putConfigPayloads = []
 
     // Spy on window.open so we can assert the button wiring without requiring
     // a real Jupyter server to be running.
@@ -108,6 +111,35 @@ test.describe('Settings + utility buttons', () => {
           alphafold_multimer: { argv: [], timeout_seconds: 3600 },
         },
       },
+      retrieval: {
+        provider: 'ncbi_blast_remote',
+        feature_flags: {
+          enabled: true,
+          expose_rest: true,
+          expose_mcp: true,
+          allow_job_grounding: false,
+          evidence_enrichment: true,
+          export_parquet: false,
+          create_schema_on_startup: true,
+        },
+        blast: {
+          remote_base_url: 'https://blast.ncbi.nlm.nih.gov/Blast.cgi',
+          default_program: 'blastp',
+          default_database: 'swissprot',
+          default_hitlist_size: 25,
+          max_hitlist_size: 100,
+          poll_interval_seconds: 5,
+          max_poll_attempts: 60,
+          request_timeout_seconds: 30,
+        },
+        storage: {
+          data_dir: '/tmp/retrieval',
+          duckdb_path: '/tmp/retrieval/blast_retrieval.duckdb',
+          parquet_export_dir: '/tmp/retrieval/parquet',
+          raw_payload_dir: '/tmp/retrieval/raw_payloads',
+          manifest_dir: '/tmp/retrieval/manifests',
+        },
+      },
     }
 
     await page.route('**/api/mcp/config', async (route) => {
@@ -117,6 +149,7 @@ test.describe('Settings + utility buttons', () => {
         return
       }
       if (method === 'PUT') {
+        putConfigPayloads.push(route.request().postDataJSON())
         await jsonRoute(route, minimalConfig)
         return
       }
@@ -168,5 +201,27 @@ test.describe('Settings + utility buttons', () => {
     // The app uses a fixed localhost URL today.
     const openedUrl = await page.evaluate(() => (window as any).__lastWindowOpenUrl)
     expect(openedUrl).toContain('http://localhost:8888')
+  })
+
+  test('BLAST retrieval settings render and are included in saved config', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 1800 })
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+
+    await expect(page.getByRole('heading', { name: 'BLAST Retrieval' })).toBeVisible()
+    const groundingToggle = page.getByLabel('allow job grounding (opt-in)')
+    await expect(groundingToggle).toBeVisible()
+    await groundingToggle.click()
+
+    const programInput = page.getByLabel('Program')
+    await programInput.scrollIntoViewIfNeeded()
+    await programInput.fill('blastx')
+    // Modal footer can be clipped in this viewport/layout; dispatch click directly.
+    await page.getByRole('button', { name: 'Save' }).dispatchEvent('click')
+
+    expect(putConfigPayloads.length).toBeGreaterThan(0)
+    const latest = putConfigPayloads[putConfigPayloads.length - 1]
+    expect(latest?.retrieval?.feature_flags?.allow_job_grounding).toBe(true)
+    expect(latest?.retrieval?.blast?.default_program).toBe('blastx')
   })
 })

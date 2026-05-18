@@ -22,6 +22,8 @@ Use this page as the **canonical entrypoint** to find the right guide.
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Component overview, run modes, request flow, backend routing, API surface |
+| [BLAST_RAG_INTEGRATION_PLAN.md](BLAST_RAG_INTEGRATION_PLAN.md) | DuckDB-first plan for integrating NCBI BLAST retrieval, evidence caching, dashboard grounding UX, and optional `ipfs_datasets_py` ingestion |
+| [BLAST_RAG_TODO.md](BLAST_RAG_TODO.md) | Actionable multi-session todo ledger for BLAST RAG work, including dashboard evidence/grounding milestones and quick-resume state |
 | [AGENTS.md](AGENTS.md) | How AI agents and contributors should interact with the codebase deterministically |
 
 ---

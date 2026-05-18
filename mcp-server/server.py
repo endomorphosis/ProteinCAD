@@ -13,9 +13,11 @@ import os
 import json
 import asyncio
 import contextlib
+from itertools import chain
+from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -26,6 +28,9 @@ import logging
 from model_backends import BackendManager, EmbeddedBackend, allow_mock_outputs
 from runtime_config import RuntimeConfigManager
 from gpu_init import setup_gpu_for_server
+from retrieval_store import RetrievalStore
+from retrieval_service import BlastRetrievalService
+from retrieval_provider import RetrievalConfigError, RetrievalError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Runtime config + backend manager (supports NIM/external/embedded + fallback)
 config_manager = RuntimeConfigManager()
 backend_manager = BackendManager(config_manager)
+runtime_config_lock = asyncio.Lock()
 
 # Initialize GPU optimizations on startup
 logger.info("Initializing GPU optimizations...")
@@ -44,6 +50,11 @@ app = FastAPI(
     title="Protein Binder Design MCP Server",
     description=f"Model Context Protocol server for managing protein design workflows\nBackend: {os.getenv('MODEL_BACKEND', 'nim')}",
     version="1.0.0"
+)
+app.state.retrieval_store = RetrievalStore(config_manager.get().retrieval)
+app.state.retrieval_service = BlastRetrievalService(
+    config=config_manager.get().retrieval,
+    store=app.state.retrieval_store,
 )
 
 
@@ -127,6 +138,206 @@ async def _startup_tasks() -> None:
         asyncio.create_task(_maybe_autobootstrap_embedded_assets())
     except Exception:
         pass
+    try:
+        retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
+        if retrieval_error:
+            logger.warning("BLAST retrieval startup initialization failed: %s", retrieval_error)
+    except Exception:
+        pass
+
+
+async def _refresh_retrieval_store() -> None:
+    app.state.retrieval_store.update_config(config_manager.get().retrieval)
+    app.state.retrieval_service = BlastRetrievalService(
+        config=config_manager.get().retrieval,
+        store=app.state.retrieval_store,
+    )
+    retrieval_error = await asyncio.to_thread(app.state.retrieval_store.initialize_if_enabled)
+    if retrieval_error:
+        logger.warning("BLAST retrieval initialization failed after config refresh: %s", retrieval_error)
+
+
+def _retrieval_runtime_config():
+    return config_manager.get().retrieval
+
+
+def _ensure_retrieval_rest_enabled():
+    cfg = _retrieval_runtime_config()
+    if not cfg.feature_flags.enabled or not cfg.feature_flags.expose_rest:
+        raise HTTPException(status_code=404, detail="BLAST retrieval REST endpoints are disabled")
+    return cfg
+
+
+def _ensure_retrieval_mcp_enabled() -> None:
+    cfg = _retrieval_runtime_config()
+    if not cfg.feature_flags.enabled or not cfg.feature_flags.expose_mcp:
+        raise RuntimeError("BLAST retrieval MCP tools are disabled")
+
+
+def _serialize_retrieval_result(result: Any) -> Dict[str, Any]:
+    if hasattr(result, "__dataclass_fields__"):
+        return asdict(result)
+    if isinstance(result, dict):
+        return result
+    raise TypeError(f"Unsupported retrieval result payload type: {type(result).__name__}")
+
+
+def _normalize_retrieval_payload(
+    payload: Dict[str, Any],
+    *,
+    cached: Optional[bool] = None,
+    provider_override: Optional[str] = None,
+    request_id_override: Optional[str] = None,
+    cache_key_override: Optional[str] = None,
+    run_id_override: Optional[str] = None,
+    remote_request_id_override: Optional[str] = None,
+    remote_queue_hint_seconds_override: Optional[float] = None,
+    raw_payload_path_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    hits = list(payload.get("hits") or [])
+    annotations = list(payload.get("annotations") or [])
+    evidence_documents = list(payload.get("evidence_documents") or [])
+    manifests = list(payload.get("dataset_manifests") or [])
+    runs = list(payload.get("runs") or [])
+    latest_run = runs[-1] if runs else {}
+    request_id = request_id_override or payload.get("request_id")
+    provider = provider_override or payload.get("provider") or latest_run.get("provider")
+
+    top_hits: List[Dict[str, Any]] = []
+    for hit in hits[:5]:
+        top_hits.append(
+            {
+                "hit_rank": hit.get("hit_rank"),
+                "accession": hit.get("accession"),
+                "title": hit.get("title"),
+                "organism": hit.get("organism"),
+                "bit_score": hit.get("bit_score"),
+                "e_value": hit.get("e_value"),
+                "identity_fraction": hit.get("identity_fraction"),
+                "query_coverage": hit.get("query_coverage"),
+            }
+        )
+
+    manifest_refs: List[Dict[str, Any]] = []
+    for manifest in manifests:
+        manifest_id = manifest.get("manifest_id")
+        if not manifest_id:
+            continue
+        manifest_refs.append(
+            {
+                "manifest_id": manifest_id,
+                "request_id": manifest.get("request_id"),
+                "run_id": manifest.get("run_id"),
+                "provider": manifest.get("provider"),
+                "uri": f"retrieval-manifest://{manifest_id}",
+            }
+        )
+
+    provenance_sources = sorted(
+        {
+            str(source).strip()
+            for source in [
+                *[annotation.get("source_system") for annotation in annotations],
+                *[evidence.get("source_system") for evidence in evidence_documents],
+            ]
+            if source
+        }
+    )
+    transform_versions = sorted(
+        {
+            str(version).strip()
+            for version in chain(
+                (annotation.get("transform_version") for annotation in annotations),
+                (evidence.get("transform_version") for evidence in evidence_documents),
+            )
+            if version
+        }
+    )
+    retrieved_times = sorted(
+        [
+            str(ts)
+            for ts in chain(
+                (annotation.get("retrieved_at") for annotation in annotations),
+                (evidence.get("retrieved_at") for evidence in evidence_documents),
+            )
+            if ts
+        ]
+    )
+
+    status = payload.get("status") or "unknown"
+    is_implicitly_cached = status == "completed" and bool(payload.get("cache_key"))
+    effective_cached = bool(cached) if cached is not None else is_implicitly_cached
+    return {
+        "request_id": request_id,
+        "run_id": run_id_override or latest_run.get("run_id"),
+        "cache_key": cache_key_override or payload.get("cache_key"),
+        "provider": provider,
+        "cached": effective_cached,
+        "status": status,
+        "remote_request_id": remote_request_id_override
+        if remote_request_id_override is not None
+        else latest_run.get("remote_request_id"),
+        "remote_queue_hint_seconds": remote_queue_hint_seconds_override
+        if remote_queue_hint_seconds_override is not None
+        else latest_run.get("remote_queue_hint_seconds"),
+        "raw_payload_path": raw_payload_path_override
+        if raw_payload_path_override is not None
+        else latest_run.get("raw_payload_path"),
+        "hit_count": len(hits),
+        "annotation_count": len(annotations),
+        "evidence_count": len(evidence_documents),
+        "top_hits": top_hits,
+        "evidence_summary": {
+            "document_count": len(evidence_documents),
+            "packet": payload.get("evidence_packet") or {},
+        },
+        "manifest_refs": manifest_refs,
+        "provenance": {
+            "sources": provenance_sources,
+            "transform_versions": transform_versions,
+            "latest_retrieved_at": retrieved_times[-1] if retrieved_times else None,
+        },
+        "result": payload,
+    }
+
+
+def _normalize_retrieval_result(result: Any) -> Dict[str, Any]:
+    serialized = _serialize_retrieval_result(result)
+    if "result" in serialized and isinstance(serialized.get("result"), dict):
+        nested = dict(serialized.get("result") or {})
+        return _normalize_retrieval_payload(
+            nested,
+            cached=bool(serialized.get("cached")),
+            provider_override=serialized.get("provider"),
+            request_id_override=serialized.get("request_id"),
+            cache_key_override=serialized.get("cache_key"),
+            run_id_override=serialized.get("run_id"),
+            remote_request_id_override=serialized.get("remote_request_id"),
+            remote_queue_hint_seconds_override=serialized.get("remote_queue_hint_seconds"),
+            raw_payload_path_override=serialized.get("raw_payload_path"),
+        )
+    return _normalize_retrieval_payload(serialized)
+
+
+def _retrieval_mcp_enabled() -> bool:
+    cfg = _retrieval_runtime_config()
+    return bool(cfg.feature_flags.enabled and cfg.feature_flags.expose_mcp)
+
+
+def _parse_resource_identifier(resource_id: str) -> tuple[str, str]:
+    if resource_id.startswith("job://"):
+        return ("job", resource_id.replace("job://", "", 1))
+    if resource_id.startswith("retrieval://"):
+        return ("retrieval", resource_id.replace("retrieval://", "", 1))
+    if resource_id.startswith("retrieval-manifest://"):
+        return ("retrieval_manifest", resource_id.replace("retrieval-manifest://", "", 1))
+    if resource_id in jobs_db:
+        return ("job", resource_id)
+    if resource_id.startswith("retrieval_"):
+        return ("retrieval", resource_id)
+    if resource_id.endswith("_parquet"):
+        return ("retrieval_manifest", resource_id)
+    return ("job", resource_id)
 
 
 @app.get("/api/config")
@@ -144,10 +355,12 @@ async def update_runtime_config(request: Request) -> Dict[str, Any]:
     """
     patch = await request.json()
     try:
-        updated = config_manager.update(patch)
-        # Force backend rebuild on next use.
-        _ = backend_manager.get()
-        return updated.model_dump()
+        async with runtime_config_lock:
+            updated = config_manager.update(patch)
+            # Force backend rebuild on next use.
+            _ = backend_manager.get()
+            await _refresh_retrieval_store()
+            return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except Exception as exc:
@@ -158,9 +371,11 @@ async def update_runtime_config(request: Request) -> Dict[str, Any]:
 async def reset_runtime_config() -> Dict[str, Any]:
     """Reset runtime config to defaults."""
     try:
-        updated = config_manager.reset_to_defaults()
-        _ = backend_manager.get()
-        return updated.model_dump()
+        async with runtime_config_lock:
+            updated = config_manager.reset_to_defaults()
+            _ = backend_manager.get()
+            await _refresh_retrieval_store()
+            return updated.model_dump()
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
@@ -296,6 +511,20 @@ class ProteinSequenceInput(BaseModel):
     sequence: str = Field(..., description="Target protein amino acid sequence")
     job_name: Optional[str] = Field(None, description="Optional name for the job")
     num_designs: int = Field(5, description="Number of binder designs to generate")
+    ground_with_blast_evidence: bool = Field(
+        False,
+        description="When true, opt-in to BLAST retrieval grounding for this design job",
+    )
+    retrieval_program: Optional[str] = Field(None, description="Optional BLAST program override for this job")
+    retrieval_database: Optional[str] = Field(None, description="Optional BLAST database override for this job")
+    retrieval_hitlist_size: Optional[int] = Field(None, description="Optional BLAST hitlist size override for this job")
+
+
+class RetrievalRequestInput(BaseModel):
+    sequence: str = Field(..., description="Protein amino acid sequence or FASTA query")
+    program: Optional[str] = Field(None, description="Optional BLAST program override")
+    database: Optional[str] = Field(None, description="Optional BLAST database override")
+    hitlist_size: Optional[int] = Field(None, description="Optional BLAST hitlist size override")
 
 # AlphaFold optimization settings
 class AlphaFoldOptimizationSettings(BaseModel):
@@ -340,10 +569,12 @@ class JobStatus(BaseModel):
     created_at: str
     updated_at: str
     job_name: Optional[str] = None
+    input: Optional[Dict[str, Any]] = None
     current_stage: Optional[str] = None
     progress_pct: Optional[float] = None
     progress_message: Optional[str] = None
     progress: Dict[str, Any]
+    retrieval: Optional[Dict[str, Any]] = None
     results: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     error_detail: Optional[str] = None
@@ -376,225 +607,272 @@ class ResourceInfo(BaseModel):
 @app.get("/mcp/v1/tools")
 async def list_tools() -> Dict[str, List[ToolInfo]]:
     """List available MCP tools"""
-    return {
-        "tools": [
-            ToolInfo(
-                name="get_runtime_config",
-                description="Get the MCP server runtime routing/provider config",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            ToolInfo(
-                name="update_runtime_config",
-                description="Update the MCP server runtime config (deep-merged and persisted when enabled)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "patch": {
-                            "type": "object",
-                            "description": "Partial config patch to merge into current config",
-                        }
-                    },
+    tools = [
+        ToolInfo(
+            name="get_runtime_config",
+            description="Get the MCP server runtime routing/provider config",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        ToolInfo(
+            name="update_runtime_config",
+            description="Update the MCP server runtime config (deep-merged and persisted when enabled)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "object",
+                        "description": "Partial config patch to merge into current config",
+                    }
                 },
-            ),
-            ToolInfo(
-                name="reset_runtime_config",
-                description="Reset the MCP server runtime config to defaults",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-            ToolInfo(
-                name="embedded_bootstrap",
-                description="Trigger best-effort embedded asset bootstrap/download into /models",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "models": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Subset of models to bootstrap: proteinmpnn, rfdiffusion, alphafold",
-                        }
-                    },
+            },
+        ),
+        ToolInfo(
+            name="reset_runtime_config",
+            description="Reset the MCP server runtime config to defaults",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        ToolInfo(
+            name="embedded_bootstrap",
+            description="Trigger best-effort embedded asset bootstrap/download into /models",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "models": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Subset of models to bootstrap: proteinmpnn, rfdiffusion, alphafold",
+                    }
                 },
-            ),
-            ToolInfo(
-                name="design_protein_binder",
-                description="Design protein binders for a target sequence",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequence": {
-                            "type": "string",
-                            "description": "Target protein amino acid sequence"
-                        },
-                        "job_name": {
-                            "type": "string",
-                            "description": "Optional name for the job"
-                        },
-                        "num_designs": {
-                            "type": "integer",
-                            "description": "Number of binder designs to generate",
-                            "default": 5
-                        }
+            },
+        ),
+        ToolInfo(
+            name="design_protein_binder",
+            description="Design protein binders for a target sequence",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Target protein amino acid sequence"
                     },
-                    "required": ["sequence"]
-                }
-            ),
-            ToolInfo(
-                name="get_job_status",
-                description="Get the status of a protein design job",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {
-                            "type": "string",
-                            "description": "Job ID to query"
-                        }
+                    "job_name": {
+                        "type": "string",
+                        "description": "Optional name for the job"
                     },
-                    "required": ["job_id"]
-                }
-            ),
-            ToolInfo(
-                name="list_jobs",
-                description="List all protein design jobs",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-            ToolInfo(
-                name="delete_job",
-                description="Delete a protein design job",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "job_id": {
-                            "type": "string",
-                            "description": "Job ID to delete"
-                        }
+                    "num_designs": {
+                        "type": "integer",
+                        "description": "Number of binder designs to generate",
+                        "default": 5
                     },
-                    "required": ["job_id"]
-                }
-            ),
-            ToolInfo(
-                name="check_services",
-                description="Check status of all backend services (NIM/native/hybrid)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-            ToolInfo(
-                name="predict_structure",
-                description="Predict structure from sequence (AlphaFold2 backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequence": {
-                            "type": "string",
-                            "description": "Protein amino acid sequence"
-                        }
+                    "ground_with_blast_evidence": {
+                        "type": "boolean",
+                        "description": "When true, opt-in to BLAST retrieval grounding for this design job",
+                        "default": False
                     },
-                    "required": ["sequence"]
-                }
-            ),
-            ToolInfo(
-                name="design_binder_backbone",
-                description="Generate binder backbones from a target PDB (RFDiffusion backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "target_pdb": {
-                            "type": "string",
-                            "description": "Target protein PDB content (string)"
-                        },
-                        "num_designs": {
-                            "type": "integer",
-                            "description": "Number of backbones to generate",
-                            "default": 5
-                        }
+                    "retrieval_program": {
+                        "type": "string",
+                        "description": "Optional BLAST program override for this job"
                     },
-                    "required": ["target_pdb"]
-                }
-            ),
-            ToolInfo(
-                name="generate_sequence",
-                description="Generate binder sequence from a backbone PDB (ProteinMPNN backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "backbone_pdb": {
-                            "type": "string",
-                            "description": "Backbone PDB content (string)"
-                        }
+                    "retrieval_database": {
+                        "type": "string",
+                        "description": "Optional BLAST database override for this job"
                     },
-                    "required": ["backbone_pdb"]
-                }
-            ),
-            ToolInfo(
-                name="predict_complex",
-                description="Predict complex structure from sequences (AlphaFold2-Multimer backend)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "sequences": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of chain sequences"
-                        }
+                    "retrieval_hitlist_size": {
+                        "type": "integer",
+                        "description": "Optional BLAST hitlist size override for this job"
+                    }
+                },
+                "required": ["sequence"]
+            }
+        ),
+        ToolInfo(
+            name="get_job_status",
+            description="Get the status of a protein design job",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Job ID to query"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        ),
+        ToolInfo(
+            name="list_jobs",
+            description="List all protein design jobs",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="delete_job",
+            description="Delete a protein design job",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "Job ID to delete"
+                    }
+                },
+                "required": ["job_id"]
+            }
+        ),
+        ToolInfo(
+            name="check_services",
+            description="Check status of all backend services (NIM/native/hybrid)",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="predict_structure",
+            description="Predict structure from sequence (AlphaFold2 backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Protein amino acid sequence"
+                    }
+                },
+                "required": ["sequence"]
+            }
+        ),
+        ToolInfo(
+            name="design_binder_backbone",
+            description="Generate binder backbones from a target PDB (RFDiffusion backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_pdb": {
+                        "type": "string",
+                        "description": "Target protein PDB content (string)"
                     },
-                    "required": ["sequences"]
-                }
-            ),
-            ToolInfo(
-                name="get_alphafold_settings",
-                description="Get current AlphaFold optimization settings",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-            ToolInfo(
-                name="update_alphafold_settings",
-                description="Update AlphaFold optimization settings (speed_preset, disable_templates, num_recycles, etc.)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "speed_preset": {
-                            "type": "string",
-                            "description": "Speed preset: fast (29% faster), balanced (20% faster, default), quality (slowest)"
-                        },
-                        "disable_templates": {
-                            "type": "boolean",
-                            "description": "Disable template search for speed"
-                        },
-                        "num_recycles": {
-                            "type": "integer",
-                            "description": "Number of recycling iterations (3 for speed, -1 for model default ~20)"
-                        },
-                        "num_ensemble": {
-                            "type": "integer",
-                            "description": "Number of ensemble evaluations"
-                        },
-                        "mmseqs2_max_seqs": {
-                            "type": "integer",
-                            "description": "Maximum sequences for MMseqs2 MSA"
-                        },
-                        "msa_mode": {
-                            "type": "string",
-                            "description": "MSA mode: jackhmmer or mmseqs2"
-                        }
+                    "num_designs": {
+                        "type": "integer",
+                        "description": "Number of backbones to generate",
+                        "default": 5
+                    }
+                },
+                "required": ["target_pdb"]
+            }
+        ),
+        ToolInfo(
+            name="generate_sequence",
+            description="Generate binder sequence from a backbone PDB (ProteinMPNN backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "backbone_pdb": {
+                        "type": "string",
+                        "description": "Backbone PDB content (string)"
+                    }
+                },
+                "required": ["backbone_pdb"]
+            }
+        ),
+        ToolInfo(
+            name="predict_complex",
+            description="Predict complex structure from sequences (AlphaFold2-Multimer backend)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sequences": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of chain sequences"
+                    }
+                },
+                "required": ["sequences"]
+            }
+        ),
+        ToolInfo(
+            name="get_alphafold_settings",
+            description="Get current AlphaFold optimization settings",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        ToolInfo(
+            name="update_alphafold_settings",
+            description="Update AlphaFold optimization settings (speed_preset, disable_templates, num_recycles, etc.)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "speed_preset": {
+                        "type": "string",
+                        "description": "Speed preset: fast (29% faster), balanced (20% faster, default), quality (slowest)"
+                    },
+                    "disable_templates": {
+                        "type": "boolean",
+                        "description": "Disable template search for speed"
+                    },
+                    "num_recycles": {
+                        "type": "integer",
+                        "description": "Number of recycling iterations (3 for speed, -1 for model default ~20)"
+                    },
+                    "num_ensemble": {
+                        "type": "integer",
+                        "description": "Number of ensemble evaluations"
+                    },
+                    "mmseqs2_max_seqs": {
+                        "type": "integer",
+                        "description": "Maximum sequences for MMseqs2 MSA"
+                    },
+                    "msa_mode": {
+                        "type": "string",
+                        "description": "MSA mode: jackhmmer or mmseqs2"
                     }
                 }
-            ),
-            ToolInfo(
-                name="reset_alphafold_settings",
-                description="Reset AlphaFold optimization settings to defaults",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            )
-        ]
-    }
+            }
+        ),
+        ToolInfo(
+            name="reset_alphafold_settings",
+            description="Reset AlphaFold optimization settings to defaults",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+    ]
+    retrieval_cfg = _retrieval_runtime_config()
+    if retrieval_cfg.feature_flags.enabled and retrieval_cfg.feature_flags.expose_mcp:
+        tools.extend(
+            [
+                ToolInfo(
+                    name="start_blast_retrieval",
+                    description="Run BLAST retrieval for a sequence and return normalized evidence results",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "sequence": {"type": "string", "description": "Protein amino acid sequence or FASTA query"},
+                            "program": {"type": "string", "description": "Optional BLAST program override"},
+                            "database": {"type": "string", "description": "Optional BLAST database override"},
+                            "hitlist_size": {"type": "integer", "description": "Optional BLAST hitlist size override"},
+                        },
+                        "required": ["sequence"],
+                    },
+                ),
+                ToolInfo(
+                    name="get_blast_retrieval",
+                    description="Fetch a normalized BLAST retrieval result by request id",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "request_id": {"type": "string", "description": "Retrieval request id to read"},
+                        },
+                        "required": ["request_id"],
+                    },
+                ),
+            ]
+        )
+    return {"tools": tools}
 
 
 def _jsonrpc_error(_id: Any, code: int, message: str) -> Dict[str, Any]:
@@ -664,16 +942,20 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     patch = arguments.get("patch")
                 if not isinstance(patch, dict):
                     return _jsonrpc_error(msg_id, -32602, "Invalid patch")
-                updated = config_manager.update(patch)
-                _ = backend_manager.get()
+                async with runtime_config_lock:
+                    updated = config_manager.update(patch)
+                    _ = backend_manager.get()
+                    await _refresh_retrieval_store()
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(updated.model_dump(), indent=2)}], "isError": False},
                 )
 
             if name == "reset_runtime_config":
-                updated = config_manager.reset_to_defaults()
-                _ = backend_manager.get()
+                async with runtime_config_lock:
+                    updated = config_manager.reset_to_defaults()
+                    _ = backend_manager.get()
+                    await _refresh_retrieval_store()
                 return _jsonrpc_result(
                     msg_id,
                     {"content": [{"type": "text", "text": json.dumps(updated.model_dump(), indent=2)}], "isError": False},
@@ -704,6 +986,46 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     {"content": [{"type": "text", "text": json.dumps(payload, indent=2)}], "isError": False},
                 )
 
+            if name == "start_blast_retrieval":
+                try:
+                    _ensure_retrieval_mcp_enabled()
+                except RuntimeError:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval MCP tools are disabled")
+                sequence = arguments.get("sequence")
+                if not sequence:
+                    return _jsonrpc_error(msg_id, -32602, "Missing sequence")
+                result = await app.state.retrieval_service.retrieve(
+                    sequence,
+                    program=arguments.get("program"),
+                    database=arguments.get("database"),
+                    hitlist_size=arguments.get("hitlist_size"),
+                )
+                normalized = _normalize_retrieval_result(result)
+                return _jsonrpc_result(
+                    msg_id,
+                    {
+                        "content": [{"type": "text", "text": json.dumps(normalized, indent=2, default=str)}],
+                        "isError": False,
+                    },
+                )
+
+            if name == "get_blast_retrieval":
+                try:
+                    _ensure_retrieval_mcp_enabled()
+                except RuntimeError:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval MCP tools are disabled")
+                request_id = arguments.get("request_id")
+                if not request_id:
+                    return _jsonrpc_error(msg_id, -32602, "Missing request_id")
+                result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
+                if not result:
+                    return _jsonrpc_error(msg_id, -32000, "BLAST retrieval request not found")
+                normalized = _normalize_retrieval_payload(result, request_id_override=request_id)
+                return _jsonrpc_result(
+                    msg_id,
+                    {"content": [{"type": "text", "text": json.dumps(normalized, indent=2, default=str)}], "isError": False},
+                )
+
             if name == "design_protein_binder":
                 input_data = ProteinSequenceInput(**arguments)
                 job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(jobs_db)}"
@@ -713,12 +1035,37 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
                     "created_at": datetime.now().isoformat(),
                     "updated_at": datetime.now().isoformat(),
                     "job_name": input_data.job_name,
-                    "input": {"sequence": input_data.sequence, "num_designs": input_data.num_designs},
+                    "input": {
+                        "sequence": input_data.sequence,
+                        "num_designs": input_data.num_designs,
+                        "ground_with_blast_evidence": bool(input_data.ground_with_blast_evidence),
+                        "retrieval": {
+                            "program": input_data.retrieval_program,
+                            "database": input_data.retrieval_database,
+                            "hitlist_size": input_data.retrieval_hitlist_size,
+                        },
+                    },
                     "progress": {
                         "alphafold": "pending",
                         "rfdiffusion": "pending",
                         "proteinmpnn": "pending",
                         "alphafold_multimer": "pending",
+                    },
+                    "retrieval": {
+                        "requested": bool(input_data.ground_with_blast_evidence),
+                        "enabled": False,
+                        "status": "not_requested" if not input_data.ground_with_blast_evidence else "queued",
+                        "message": "BLAST grounding not requested"
+                        if not input_data.ground_with_blast_evidence
+                        else "BLAST grounding queued",
+                        "started_at": None,
+                        "completed_at": None,
+                        "request_id": None,
+                        "cached": None,
+                        "hit_count": 0,
+                        "evidence_count": 0,
+                        "error": None,
+                        "result": None,
                     },
                     "results": None,
                     "error": None,
@@ -885,19 +1232,22 @@ async def mcp_jsonrpc(request: Request) -> Dict[str, Any]:
             uri = params.get("uri") or params.get("path")
             if not uri:
                 return _jsonrpc_error(msg_id, -32602, "Missing resource uri")
-            if uri.startswith("job://"):
-                job_id = uri.replace("job://", "")
-            else:
-                job_id = uri
-            contents = (await get_resource(job_id)).get("contents", [])
+            contents = (await get_resource(uri)).get("contents", [])
             return _jsonrpc_result(msg_id, {"contents": contents})
 
         if method in {"shutdown", "exit"}:
             return _jsonrpc_result(msg_id, None)
 
         return _jsonrpc_error(msg_id, -32601, f"Method not found: {method}")
-    except Exception as exc:
-        return _jsonrpc_error(msg_id, -32603, str(exc))
+    except RetrievalConfigError:
+        logger.warning("Invalid BLAST retrieval MCP request")
+        return _jsonrpc_error(msg_id, -32602, "Invalid BLAST retrieval request")
+    except RetrievalError:
+        logger.warning("BLAST retrieval MCP tool failed")
+        return _jsonrpc_error(msg_id, -32000, "BLAST retrieval failed")
+    except Exception:
+        logger.exception("Unhandled MCP JSON-RPC error")
+        return _jsonrpc_error(msg_id, -32603, "Internal server error")
 
 @app.get("/mcp/v1/resources")
 async def list_resources() -> Dict[str, List[ResourceInfo]]:
@@ -911,27 +1261,121 @@ async def list_resources() -> Dict[str, List[ResourceInfo]]:
                 description=f"Results for protein design job {job_id}",
                 mimeType="application/json"
             ))
+    if _retrieval_mcp_enabled():
+        cached_requests = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=100)
+        for entry in cached_requests:
+            request_id = entry.get("request_id")
+            if not request_id:
+                continue
+            resources.append(ResourceInfo(
+                uri=f"retrieval://{request_id}",
+                name=f"blast-retrieval-{request_id}",
+                description=f"Cached BLAST evidence bundle for retrieval request {request_id}",
+                mimeType="application/json",
+            ))
+        dataset_manifests = await asyncio.to_thread(app.state.retrieval_service.list_dataset_manifests, limit=100)
+        for manifest in dataset_manifests:
+            manifest_id = manifest.get("manifest_id")
+            request_id = manifest.get("request_id")
+            if not manifest_id:
+                continue
+            description = f"Parquet manifest for BLAST retrieval bundle {manifest_id}"
+            if request_id:
+                description += f" (request {request_id})"
+            resources.append(ResourceInfo(
+                uri=f"retrieval-manifest://{manifest_id}",
+                name=f"blast-retrieval-manifest-{manifest_id}",
+                description=description,
+                mimeType="application/json",
+            ))
     return {"resources": resources}
 
-@app.get("/mcp/v1/resources/{job_id}")
-async def get_resource(job_id: str) -> Dict[str, Any]:
+@app.get("/mcp/v1/resources/{resource_id:path}")
+async def get_resource(resource_id: str) -> Dict[str, Any]:
     """Get a specific resource"""
-    if job_id not in jobs_db:
+    resource_kind, identifier = _parse_resource_identifier(resource_id)
+
+    if resource_kind == "retrieval":
+        if not _retrieval_mcp_enabled():
+            raise HTTPException(status_code=404, detail="BLAST retrieval MCP resources are disabled")
+        result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, identifier)
+        if not result:
+            raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
+        normalized = _normalize_retrieval_payload(result, request_id_override=identifier)
+        return {
+            "contents": [
+                {
+                    "uri": f"retrieval://{identifier}",
+                    "mimeType": "application/json",
+                    "text": json.dumps(normalized, indent=2, default=str),
+                }
+            ]
+        }
+
+    if resource_kind == "retrieval_manifest":
+        if not _retrieval_mcp_enabled():
+            raise HTTPException(status_code=404, detail="BLAST retrieval MCP resources are disabled")
+        manifest = await asyncio.to_thread(app.state.retrieval_service.get_dataset_manifest, identifier)
+        if not manifest:
+            raise HTTPException(status_code=404, detail="BLAST retrieval manifest not found")
+        return {
+            "contents": [
+                {
+                    "uri": f"retrieval-manifest://{identifier}",
+                    "mimeType": "application/json",
+                    "text": json.dumps(manifest, indent=2, default=str),
+                }
+            ]
+        }
+
+    if identifier not in jobs_db:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = jobs_db[job_id]
+
+    job = jobs_db[identifier]
     if not job.get("results"):
         raise HTTPException(status_code=404, detail="Job results not available yet")
-    
+
     return {
         "contents": [
             {
-                "uri": f"job://{job_id}",
+                "uri": f"job://{identifier}",
                 "mimeType": "application/json",
                 "text": json.dumps(job["results"], indent=2)
             }
         ]
     }
+
+
+@app.post("/api/retrieval/requests")
+async def create_retrieval_request(input_data: RetrievalRequestInput) -> Dict[str, Any]:
+    """Submit a BLAST retrieval request and return the normalized evidence result."""
+    _ensure_retrieval_rest_enabled()
+    result = await app.state.retrieval_service.retrieve(
+        input_data.sequence,
+        program=input_data.program,
+        database=input_data.database,
+        hitlist_size=input_data.hitlist_size,
+    )
+    return _normalize_retrieval_result(result)
+
+
+@app.get("/api/retrieval/requests/{request_id}")
+async def get_retrieval_request(request_id: str) -> Dict[str, Any]:
+    """Poll a BLAST retrieval request/result by request id."""
+    _ensure_retrieval_rest_enabled()
+    result = await asyncio.to_thread(app.state.retrieval_service.get_request_result, request_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="BLAST retrieval request not found")
+    return _normalize_retrieval_payload(result, request_id_override=request_id)
+
+
+@app.get("/api/retrieval/cache")
+async def list_retrieval_cache(limit: int = Query(100, ge=1, le=1000)) -> Dict[str, Any]:
+    """List cached BLAST retrieval entries."""
+    _ensure_retrieval_rest_enabled()
+    entries = await asyncio.to_thread(app.state.retrieval_service.list_cached_requests, limit=limit)
+    return {"entries": entries}
+
 
 # Job management endpoints
 @app.post("/api/jobs", response_model=JobStatus, response_model_exclude_unset=True)
@@ -953,13 +1397,35 @@ async def create_job(
         "progress_message": "Created",
         "input": {
             "sequence": input_data.sequence,
-            "num_designs": input_data.num_designs
+            "num_designs": input_data.num_designs,
+            "ground_with_blast_evidence": bool(input_data.ground_with_blast_evidence),
+            "retrieval": {
+                "program": input_data.retrieval_program,
+                "database": input_data.retrieval_database,
+                "hitlist_size": input_data.retrieval_hitlist_size,
+            },
         },
         "progress": {
             "alphafold": "pending",
             "rfdiffusion": "pending",
             "proteinmpnn": "pending",
             "alphafold_multimer": "pending"
+        },
+        "retrieval": {
+            "requested": bool(input_data.ground_with_blast_evidence),
+            "enabled": False,
+            "status": "not_requested" if not input_data.ground_with_blast_evidence else "queued",
+            "message": "BLAST grounding not requested"
+            if not input_data.ground_with_blast_evidence
+            else "BLAST grounding queued",
+            "started_at": None,
+            "completed_at": None,
+            "request_id": None,
+            "cached": None,
+            "hit_count": 0,
+            "evidence_count": 0,
+            "error": None,
+            "result": None,
         },
         "results": None,
         "error": None,
@@ -1035,9 +1501,12 @@ async def delete_job(job_id: str) -> Dict[str, str]:
 
 # Health check endpoints
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint"""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "retrieval": app.state.retrieval_store.diagnostics(),
+    }
 
 @app.get("/api/services/status")
 async def check_services() -> Dict[str, Any]:
@@ -1184,6 +1653,86 @@ async def process_job(job_id: str):
         
         sequence = job["input"]["sequence"]
         num_designs = job["input"]["num_designs"]
+        retrieval_state = job.get("retrieval")
+        if not isinstance(retrieval_state, dict):
+            retrieval_state = {
+                "requested": False,
+                "enabled": False,
+                "status": "not_requested",
+                "message": "BLAST grounding not requested",
+                "started_at": None,
+                "completed_at": None,
+                "request_id": None,
+                "cached": None,
+                "hit_count": 0,
+                "evidence_count": 0,
+                "error": None,
+                "result": None,
+            }
+            job["retrieval"] = retrieval_state
+        retrieval_cfg = _retrieval_runtime_config()
+        retrieval_requested = bool(job.get("input", {}).get("ground_with_blast_evidence"))
+        retrieval_state["requested"] = retrieval_requested
+        retrieval_state["enabled"] = False
+        retrieval_state["status"] = "not_requested"
+        retrieval_state["message"] = "BLAST grounding not requested"
+        retrieval_state["error"] = None
+        retrieval_state["result"] = None
+        retrieval_state["request_id"] = None
+        retrieval_state["cached"] = None
+        retrieval_state["hit_count"] = 0
+        retrieval_state["evidence_count"] = 0
+
+        if retrieval_requested:
+            if not retrieval_cfg.feature_flags.enabled:
+                retrieval_state["status"] = "disabled"
+                retrieval_state["message"] = "BLAST retrieval is disabled in runtime config"
+            elif not retrieval_cfg.feature_flags.allow_job_grounding:
+                retrieval_state["status"] = "disabled"
+                retrieval_state["message"] = "BLAST job grounding is opt-in and currently disabled"
+            else:
+                retrieval_state["enabled"] = True
+                retrieval_state["status"] = "running"
+                retrieval_state["message"] = "Running BLAST retrieval grounding"
+                retrieval_state["started_at"] = datetime.now().isoformat()
+                _job_set_progress(job, stage="retrieval", pct=2, message="Running BLAST retrieval grounding")
+                try:
+                    await broadcast_event({"type": "job.updated", "job": _public_job_dict(job)})
+                except Exception:
+                    pass
+                retrieval_input = job.get("input", {}).get("retrieval", {})
+                try:
+                    retrieval_result = await app.state.retrieval_service.retrieve(
+                        sequence,
+                        program=retrieval_input.get("program"),
+                        database=retrieval_input.get("database"),
+                        hitlist_size=retrieval_input.get("hitlist_size"),
+                    )
+                    normalized_retrieval = _normalize_retrieval_result(retrieval_result)
+                    retrieval_state["status"] = "cached" if normalized_retrieval.get("cached") else "completed"
+                    retrieval_state["message"] = (
+                        "BLAST retrieval reused cached evidence"
+                        if normalized_retrieval.get("cached")
+                        else "BLAST retrieval completed"
+                    )
+                    retrieval_state["completed_at"] = datetime.now().isoformat()
+                    retrieval_state["request_id"] = normalized_retrieval.get("request_id")
+                    retrieval_state["cached"] = normalized_retrieval.get("cached")
+                    retrieval_state["hit_count"] = normalized_retrieval.get("hit_count", 0)
+                    retrieval_state["evidence_count"] = normalized_retrieval.get("evidence_count", 0)
+                    retrieval_state["result"] = normalized_retrieval
+                    _job_set_progress(job, stage="retrieval", pct=8, message=retrieval_state["message"])
+                except Exception as retrieval_exc:
+                    short = _summarize_error(retrieval_exc)
+                    retrieval_state["status"] = "failed"
+                    retrieval_state["message"] = f"BLAST retrieval failed: {short}"
+                    retrieval_state["error"] = short
+                    retrieval_state["completed_at"] = datetime.now().isoformat()
+                    _job_set_progress(job, stage="retrieval", pct=8, message=retrieval_state["message"])
+                try:
+                    await broadcast_event({"type": "job.updated", "job": _public_job_dict(job)})
+                except Exception:
+                    pass
 
         # Optional: store richer (slower) residency sampling in job metrics snapshots.
         include_residency = (os.getenv("MCP_JOB_INCLUDE_RESIDENCY") or "0").strip() in ("1", "true", "yes")
@@ -1430,7 +1979,8 @@ async def process_job(job_id: str):
                     "complex_structure": multimer_results[i] if i < len(multimer_results) else {}
                 }
                 for i in range(num_designs)
-            ]
+            ],
+            "retrieval": job.get("retrieval", {}).get("result"),
         }
         
         job["status"] = "completed"

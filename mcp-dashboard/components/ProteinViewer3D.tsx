@@ -2043,6 +2043,14 @@ export default function ProteinViewer3D({
     }
   }
 
+  const handleVariantInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    if (!variantsRunning) {
+      void callProposeVariants()
+    }
+  }
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -2963,6 +2971,7 @@ export default function ProteinViewer3D({
                             data-testid="viewer-analysis-positions-input"
                             value={positionsText}
                             onChange={(event) => setPositionsText(event.target.value)}
+                            onKeyDown={handleVariantInputKeyDown}
                             placeholder="e.g. 9,10,28"
                             className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-cyan-400/50"
                           />
@@ -2977,6 +2986,7 @@ export default function ProteinViewer3D({
                             max={20}
                             value={numVariants}
                             onChange={(event) => updateNumVariants(Number(event.target.value))}
+                            onKeyDown={handleVariantInputKeyDown}
                             className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-cyan-400/50"
                           />
                         </label>
@@ -4030,6 +4040,7 @@ export default function ProteinViewer3D({
                       data-testid="variant-positions"
                       value={positionsText}
                       onChange={(event) => setPositionsText(event.target.value)}
+                      onKeyDown={handleVariantInputKeyDown}
                       placeholder="1-based positions e.g. 12,15,16"
                       className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
                     />
@@ -4044,6 +4055,7 @@ export default function ProteinViewer3D({
                       max={20}
                       value={numVariants}
                       onChange={(event) => updateNumVariants(Number(event.target.value))}
+                      onKeyDown={handleVariantInputKeyDown}
                       className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/50"
                     />
                   </label>
@@ -4060,7 +4072,7 @@ export default function ProteinViewer3D({
                     {variantsRunning ? 'Proposing…' : 'Propose variants'}
                   </button>
                   <p className="text-xs text-slate-400">
-                    Use the selection list above or enter positions manually to seed sequence exploration.
+                    Use the selection list above or enter positions manually to seed sequence exploration. Press Enter in any input field to run.
                   </p>
                 </div>
               </section>

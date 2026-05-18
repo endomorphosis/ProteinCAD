@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 type ProviderName = 'nim' | 'external' | 'embedded'
 
 type ServiceName = 'alphafold' | 'rfdiffusion' | 'proteinmpnn' | 'alphafold_multimer'
+type RetrievalProviderName = 'ncbi_blast_remote' | 'local_blast'
 
 type RoutingConfig = {
   mode: 'single' | 'fallback'
@@ -49,6 +50,35 @@ type MCPServerConfig = {
   nim: ProviderConfig
   external: ProviderConfig
   embedded: EmbeddedConfig
+  retrieval: {
+    provider: RetrievalProviderName
+    feature_flags: {
+      enabled: boolean
+      expose_rest: boolean
+      expose_mcp: boolean
+      allow_job_grounding: boolean
+      evidence_enrichment: boolean
+      export_parquet: boolean
+      create_schema_on_startup: boolean
+    }
+    blast: {
+      remote_base_url: string
+      default_program: string
+      default_database: string
+      default_hitlist_size: number
+      max_hitlist_size: number
+      poll_interval_seconds: number
+      max_poll_attempts: number
+      request_timeout_seconds: number
+    }
+    storage: {
+      data_dir: string
+      duckdb_path: string
+      parquet_export_dir: string
+      raw_payload_dir: string
+      manifest_dir: string
+    }
+  }
   allow_runtime_updates: boolean
 }
 
@@ -109,6 +139,35 @@ function normalizeConfig(raw: any): MCPServerConfig {
         alphafold: ensureRunner(cfg?.embedded?.runners?.alphafold, { argv: [], timeout_seconds: 3600 }),
         rfdiffusion: ensureRunner(cfg?.embedded?.runners?.rfdiffusion, { argv: [], timeout_seconds: 3600 }),
         alphafold_multimer: ensureRunner(cfg?.embedded?.runners?.alphafold_multimer, { argv: [], timeout_seconds: 3600 }),
+      },
+    },
+    retrieval: {
+      provider: cfg?.retrieval?.provider === 'local_blast' ? 'local_blast' : 'ncbi_blast_remote',
+      feature_flags: {
+        enabled: cfg?.retrieval?.feature_flags?.enabled ?? false,
+        expose_rest: cfg?.retrieval?.feature_flags?.expose_rest ?? false,
+        expose_mcp: cfg?.retrieval?.feature_flags?.expose_mcp ?? false,
+        allow_job_grounding: cfg?.retrieval?.feature_flags?.allow_job_grounding ?? false,
+        evidence_enrichment: cfg?.retrieval?.feature_flags?.evidence_enrichment ?? false,
+        export_parquet: cfg?.retrieval?.feature_flags?.export_parquet ?? false,
+        create_schema_on_startup: cfg?.retrieval?.feature_flags?.create_schema_on_startup ?? true,
+      },
+      blast: {
+        remote_base_url: cfg?.retrieval?.blast?.remote_base_url ?? 'https://blast.ncbi.nlm.nih.gov/Blast.cgi',
+        default_program: cfg?.retrieval?.blast?.default_program ?? 'blastp',
+        default_database: cfg?.retrieval?.blast?.default_database ?? 'swissprot',
+        default_hitlist_size: Number(cfg?.retrieval?.blast?.default_hitlist_size ?? 25) || 25,
+        max_hitlist_size: Number(cfg?.retrieval?.blast?.max_hitlist_size ?? 100) || 100,
+        poll_interval_seconds: Number(cfg?.retrieval?.blast?.poll_interval_seconds ?? 5) || 5,
+        max_poll_attempts: Number(cfg?.retrieval?.blast?.max_poll_attempts ?? 60) || 60,
+        request_timeout_seconds: Number(cfg?.retrieval?.blast?.request_timeout_seconds ?? 30) || 30,
+      },
+      storage: {
+        data_dir: cfg?.retrieval?.storage?.data_dir ?? '',
+        duckdb_path: cfg?.retrieval?.storage?.duckdb_path ?? '',
+        parquet_export_dir: cfg?.retrieval?.storage?.parquet_export_dir ?? '',
+        raw_payload_dir: cfg?.retrieval?.storage?.raw_payload_dir ?? '',
+        manifest_dir: cfg?.retrieval?.storage?.manifest_dir ?? '',
       },
     },
   }
@@ -277,6 +336,81 @@ export default function BackendSettings() {
         runners: {
           ...config.embedded.runners,
           [runnerKey]: { ...config.embedded.runners[runnerKey], timeout_seconds: t },
+        },
+      },
+    })
+  }
+
+  const setRetrievalFlag = (
+    key:
+      | 'enabled'
+      | 'expose_rest'
+      | 'expose_mcp'
+      | 'allow_job_grounding'
+      | 'evidence_enrichment'
+      | 'export_parquet'
+      | 'create_schema_on_startup',
+    value: boolean
+  ) => {
+    if (!config) return
+    setConfig({
+      ...config,
+      retrieval: {
+        ...config.retrieval,
+        feature_flags: {
+          ...config.retrieval.feature_flags,
+          [key]: value,
+        },
+      },
+    })
+  }
+
+  const setRetrievalBlast = (
+    key:
+      | 'remote_base_url'
+      | 'default_program'
+      | 'default_database'
+      | 'default_hitlist_size'
+      | 'max_hitlist_size'
+      | 'poll_interval_seconds'
+      | 'max_poll_attempts'
+      | 'request_timeout_seconds',
+    value: string | number
+  ) => {
+    if (!config) return
+    const numericFieldMins: Partial<
+      Record<
+        | 'default_hitlist_size'
+        | 'max_hitlist_size'
+        | 'poll_interval_seconds'
+        | 'max_poll_attempts'
+        | 'request_timeout_seconds',
+        number
+      >
+    > = {
+      default_hitlist_size: 1,
+      max_hitlist_size: 1,
+      poll_interval_seconds: 1,
+      max_poll_attempts: 1,
+      request_timeout_seconds: 1,
+    }
+
+    let nextValue: string | number
+    if (key in numericFieldMins) {
+      const parsed = Number(value)
+      const min = numericFieldMins[key as keyof typeof numericFieldMins] ?? 1
+      nextValue = Number.isFinite(parsed) ? Math.max(min, parsed) : min
+    } else {
+      nextValue = String(value)
+    }
+
+    setConfig({
+      ...config,
+      retrieval: {
+        ...config.retrieval,
+        blast: {
+          ...config.retrieval.blast,
+          [key]: nextValue,
         },
       },
     })
@@ -873,6 +1007,191 @@ export default function BackendSettings() {
                             )}
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">BLAST Retrieval</h4>
+                    <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                      Controls retrieval API exposure, evidence enrichment, and opt-in design-job grounding.
+                    </p>
+
+                    <div className="space-y-4 rounded-md border border-gray-200 p-3 dark:border-gray-800">
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.enabled}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('enabled', e.target.checked)}
+                          />
+                          retrieval enabled
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.allow_job_grounding}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('allow_job_grounding', e.target.checked)}
+                          />
+                          allow job grounding (opt-in)
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.expose_rest}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('expose_rest', e.target.checked)}
+                          />
+                          expose REST endpoints
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.expose_mcp}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('expose_mcp', e.target.checked)}
+                          />
+                          expose MCP tools/resources
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.evidence_enrichment}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('evidence_enrichment', e.target.checked)}
+                          />
+                          evidence enrichment
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.export_parquet}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('export_parquet', e.target.checked)}
+                          />
+                          export parquet bundles
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={config.retrieval.feature_flags.create_schema_on_startup}
+                            disabled={!canEdit}
+                            onChange={(e) => setRetrievalFlag('create_schema_on_startup', e.target.checked)}
+                          />
+                          create schema on startup
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Provider
+                          <select
+                            disabled={!canEdit}
+                            value={config.retrieval.provider}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                retrieval: {
+                                  ...config.retrieval,
+                                  provider: e.target.value as RetrievalProviderName,
+                                },
+                              })
+                            }
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          >
+                            <option value="ncbi_blast_remote">ncbi_blast_remote</option>
+                            <option value="local_blast">local_blast</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Remote BLAST URL
+                          <input
+                            disabled={!canEdit}
+                            value={config.retrieval.blast.remote_base_url}
+                            onChange={(e) => setRetrievalBlast('remote_base_url', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                            placeholder="https://blast.ncbi.nlm.nih.gov/Blast.cgi"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Program
+                          <input
+                            disabled={!canEdit}
+                            value={config.retrieval.blast.default_program}
+                            onChange={(e) => setRetrievalBlast('default_program', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                            placeholder="blastp"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Database
+                          <input
+                            disabled={!canEdit}
+                            value={config.retrieval.blast.default_database}
+                            onChange={(e) => setRetrievalBlast('default_database', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                            placeholder="swissprot"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Hitlist size
+                          <input
+                            disabled={!canEdit}
+                            type="number"
+                            min={1}
+                            value={config.retrieval.blast.default_hitlist_size}
+                            onChange={(e) => setRetrievalBlast('default_hitlist_size', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Max hitlist size
+                          <input
+                            disabled={!canEdit}
+                            type="number"
+                            min={1}
+                            value={config.retrieval.blast.max_hitlist_size}
+                            onChange={(e) => setRetrievalBlast('max_hitlist_size', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Poll interval (seconds)
+                          <input
+                            disabled={!canEdit}
+                            type="number"
+                            min={1}
+                            step="0.5"
+                            value={config.retrieval.blast.poll_interval_seconds}
+                            onChange={(e) => setRetrievalBlast('poll_interval_seconds', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Max poll attempts
+                          <input
+                            disabled={!canEdit}
+                            type="number"
+                            min={1}
+                            value={config.retrieval.blast.max_poll_attempts}
+                            onChange={(e) => setRetrievalBlast('max_poll_attempts', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Request timeout (seconds)
+                          <input
+                            disabled={!canEdit}
+                            type="number"
+                            min={1}
+                            step="0.5"
+                            value={config.retrieval.blast.request_timeout_seconds}
+                            onChange={(e) => setRetrievalBlast('request_timeout_seconds', e.target.value)}
+                            className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+                          />
+                        </label>
                       </div>
                     </div>
                   </section>

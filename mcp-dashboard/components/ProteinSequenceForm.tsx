@@ -26,12 +26,18 @@ const exampleSequences = [
     numDesigns: 8,
   },
 ]
+const RETRIEVAL_HITLIST_MIN = 1
+const RETRIEVAL_HITLIST_MAX = 100
 
 export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
   const [formData, setFormData] = useState<ProteinSequenceInput>({
     sequence: '',
     job_name: '',
     num_designs: 5,
+    ground_with_blast_evidence: false,
+    retrieval_program: '',
+    retrieval_database: '',
+    retrieval_hitlist_size: 25,
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -87,9 +93,24 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
         sequence: formData.sequence,
         job_name: formData.job_name || undefined,
         num_designs: formData.num_designs,
+        ground_with_blast_evidence: Boolean(formData.ground_with_blast_evidence),
+        retrieval_program: formData.ground_with_blast_evidence ? formData.retrieval_program || undefined : undefined,
+        retrieval_database: formData.ground_with_blast_evidence ? formData.retrieval_database || undefined : undefined,
+        retrieval_hitlist_size:
+          formData.ground_with_blast_evidence && typeof formData.retrieval_hitlist_size === 'number'
+            ? formData.retrieval_hitlist_size
+            : undefined,
       })
 
-      setFormData({ sequence: '', job_name: '', num_designs: 5 })
+      setFormData({
+        sequence: '',
+        job_name: '',
+        num_designs: 5,
+        ground_with_blast_evidence: false,
+        retrieval_program: '',
+        retrieval_database: '',
+        retrieval_hitlist_size: 25,
+      })
       onJobCreated()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create job')
@@ -167,6 +188,72 @@ export default function ProteinSequenceForm({ onJobCreated, prefill }: Props) {
           max="20"
           className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"
         />
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-200">
+          <input
+            type="checkbox"
+            checked={Boolean(formData.ground_with_blast_evidence)}
+            onChange={(event) =>
+              setFormData((prev) => ({
+                ...prev,
+                ground_with_blast_evidence: event.target.checked,
+              }))
+            }
+            className="h-4 w-4 rounded border-white/20 bg-slate-900 text-cyan-400"
+          />
+          Ground with BLAST evidence (opt-in)
+        </label>
+        <p className="mt-2 text-xs text-slate-400">
+          Uses cached or live BLAST retrieval when enabled in backend settings.
+        </p>
+
+        {formData.ground_with_blast_evidence && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-xs text-slate-300">
+              Program
+              <input
+                value={formData.retrieval_program || ''}
+                onChange={(event) =>
+                  setFormData((prev) => ({ ...prev, retrieval_program: event.target.value.toLowerCase() }))
+                }
+                placeholder="blastp"
+                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"
+              />
+            </label>
+            <label className="text-xs text-slate-300">
+              Database
+              <input
+                value={formData.retrieval_database || ''}
+                onChange={(event) =>
+                  setFormData((prev) => ({ ...prev, retrieval_database: event.target.value }))
+                }
+                placeholder="swissprot"
+                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"
+              />
+            </label>
+            <label className="text-xs text-slate-300">
+              Hitlist size
+              <input
+                type="number"
+                min={RETRIEVAL_HITLIST_MIN}
+                max={RETRIEVAL_HITLIST_MAX}
+                value={formData.retrieval_hitlist_size ?? 25}
+                onChange={(event) =>
+                  setFormData((prev) => {
+                    const parsed = Number.parseInt(event.target.value, 10)
+                    return {
+                      ...prev,
+                      retrieval_hitlist_size: Number.isNaN(parsed) ? 25 : parsed,
+                    }
+                  })
+                }
+                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400/40 focus:ring-2 focus:ring-cyan-400/20"
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       {error && (

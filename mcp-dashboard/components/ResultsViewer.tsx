@@ -1,8 +1,9 @@
 'use client'
 
-import { Job } from '@/lib/types'
+import { Job, RetrievalBundle } from '@/lib/types'
 import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
+import { mcpClient } from '@/lib/mcp-client'
 import {
   addToDesignLibrary,
   loadDesignLibrary,
@@ -184,6 +185,8 @@ export default function ResultsViewer({ job, onIterate }: Props) {
   const [viewer3DTitle, setViewer3DTitle] = useState('')
   const [viewerSequence, setViewerSequence] = useState<string | undefined>(undefined)
   const [library, setLibrary] = useState<DesignLibraryItem[]>([])
+  const [hitSort, setHitSort] = useState<'rank' | 'score' | 'evalue'>('rank')
+  const [resourcePreview, setResourcePreview] = useState<string | null>(null)
 
   useEffect(() => {
     const refresh = () => setLibrary(loadDesignLibrary())
@@ -229,6 +232,25 @@ export default function ResultsViewer({ job, onIterate }: Props) {
       .sort((left, right) => Number(right.bindingScore) - Number(left.bindingScore))
       .slice(0, 3)
   }, [designs])
+  const retrievalBundle: RetrievalBundle | null = useMemo(() => {
+    const fromJob = job.retrieval?.result
+    if (fromJob && typeof fromJob === 'object') return fromJob as RetrievalBundle
+    const fromResults = (job.results as any)?.retrieval
+    if (fromResults && typeof fromResults === 'object') return fromResults as RetrievalBundle
+    return null
+  }, [job.retrieval?.result, job.results])
+  const retrievalHits = useMemo(() => {
+    const hits = retrievalBundle?.top_hits || []
+    const ranked = [...hits]
+    if (hitSort === 'score') {
+      ranked.sort((a, b) => Number(b.bit_score || 0) - Number(a.bit_score || 0))
+    } else if (hitSort === 'evalue') {
+      ranked.sort((a, b) => Number(a.e_value ?? Infinity) - Number(b.e_value ?? Infinity))
+    } else {
+      ranked.sort((a, b) => Number(a.hit_rank || 0) - Number(b.hit_rank || 0))
+    }
+    return ranked
+  }, [hitSort, retrievalBundle?.top_hits])
 
   if (job.status === 'failed') {
     return (
@@ -323,6 +345,158 @@ export default function ResultsViewer({ job, onIterate }: Props) {
           <MetricCard label="Top score" value={topDesign?.bindingScore || 'n/a'} />
         </div>
       </div>
+
+      {(job.retrieval?.requested || retrievalBundle) && (
+        <section className="rounded-3xl border border-white/10 bg-slate-950/40 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h4 className="text-lg font-semibold text-white">BLAST Grounding Evidence</h4>
+              <p className="mt-1 text-sm text-slate-400">
+                Status: {job.retrieval?.status || retrievalBundle?.status || 'unknown'}
+                {job.retrieval?.message ? ` · ${job.retrieval.message}` : ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {retrievalBundle?.request_id && (
+                <button
+                  onClick={async () => {
+                    await copyTextToClipboard(`retrieval://${retrievalBundle.request_id}`)
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
+                >
+                  Copy retrieval URI
+                </button>
+              )}
+              {retrievalBundle?.request_id && (
+                <button
+                  onClick={async () => {
+                    const payload = await mcpClient.readResource(`retrieval://${retrievalBundle.request_id}`)
+                    setResourcePreview(JSON.stringify(payload, null, 2))
+                  }}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10"
+                >
+                  Open retrieval resource
+                </button>
+              )}
+            </div>
+          </div>
+
+          {retrievalBundle && (
+            <>
+              <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                <CompactStat label="Provider" value={retrievalBundle.provider || 'n/a'} />
+                <CompactStat label="Hits" value={String(retrievalBundle.hit_count || 0)} />
+                <CompactStat label="Evidence docs" value={String(retrievalBundle.evidence_count || 0)} />
+                <CompactStat label="Cache" value={retrievalBundle.cached ? 'hit' : 'miss'} />
+              </div>
+
+              {retrievalHits.length > 0 && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h5 className="text-sm font-semibold text-white">Top homologs</h5>
+                    <select
+                      value={hitSort}
+                      onChange={(event) => setHitSort(event.target.value as 'rank' | 'score' | 'evalue')}
+                      className="rounded-lg border border-white/10 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+                    >
+                      <option value="rank">Sort by rank</option>
+                      <option value="score">Sort by score</option>
+                      <option value="evalue">Sort by e-value</option>
+                    </select>
+                  </div>
+                  <div className="overflow-auto">
+                    <table className="w-full text-left text-xs text-slate-300">
+                      <thead className="text-slate-400">
+                        <tr>
+                          <th className="py-1 pr-2">Rank</th>
+                          <th className="py-1 pr-2">Accession</th>
+                          <th className="py-1 pr-2">Title</th>
+                          <th className="py-1 pr-2">Organism</th>
+                          <th className="py-1 pr-2">Bit score</th>
+                          <th className="py-1">E-value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {retrievalHits.map((hit, index) => (
+                          <tr key={`${hit.accession || 'hit'}-${index}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{hit.hit_rank ?? index + 1}</td>
+                            <td className="py-1 pr-2">{hit.accession || 'n/a'}</td>
+                            <td
+                              className="py-1 pr-2 max-w-[240px] truncate"
+                              title={hit.title || 'n/a'}
+                              aria-label={hit.title || 'n/a'}
+                            >
+                              {hit.title || 'n/a'}
+                            </td>
+                            <td className="py-1 pr-2">{hit.organism || 'n/a'}</td>
+                            <td className="py-1 pr-2">{typeof hit.bit_score === 'number' ? hit.bit_score.toFixed(1) : 'n/a'}</td>
+                            <td className="py-1">{typeof hit.e_value === 'number' ? hit.e_value.toExponential(2) : 'n/a'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {retrievalBundle?.evidence_summary?.packet?.documents?.length ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-3">
+                  <h5 className="text-sm font-semibold text-white">Evidence packet</h5>
+                  <div className="mt-2 space-y-2">
+                    {retrievalBundle.evidence_summary.packet.documents.slice(0, 5).map((doc, index) => (
+                      <div key={`${doc.evidence_id || index}`} className="rounded-xl border border-white/10 bg-white/5 p-2">
+                        <div className="text-xs font-semibold text-slate-100">{doc.title || 'Untitled evidence'}</div>
+                        <div className="mt-1 text-xs text-slate-300">{doc.content_text || 'No summary text'}</div>
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          {doc.source_system || 'source'} · {doc.source_id || 'id n/a'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {retrievalBundle?.manifest_refs?.length ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-3">
+                  <h5 className="text-sm font-semibold text-white">Dataset manifests</h5>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {retrievalBundle.manifest_refs.map((manifest) => (
+                      <button
+                        key={manifest.manifest_id}
+                        onClick={async () => {
+                          if (manifest.uri) {
+                            await copyTextToClipboard(manifest.uri)
+                          }
+                        }}
+                        className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-200 hover:bg-white/10"
+                      >
+                        {manifest.manifest_id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+
+          {resourcePreview && (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h5 className="text-sm font-semibold text-white">Resource preview</h5>
+                <button
+                  onClick={() => setResourcePreview(null)}
+                  className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs text-slate-300">
+                {resourcePreview}
+              </pre>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
         <div className="space-y-6">

@@ -45,6 +45,111 @@ function makeCompletedJob() {
   }
 }
 
+function makeCompletedJobWithRetrieval() {
+  return {
+    ...makeCompletedJob(),
+    retrieval: {
+      requested: true,
+      enabled: true,
+      status: 'cached',
+      message: 'BLAST retrieval reused cached evidence',
+      request_id: 'retrieval_abc123',
+      cached: true,
+      hit_count: 2,
+      evidence_count: 1,
+      result: {
+        request_id: 'retrieval_abc123',
+        provider: 'ncbi_blast_remote',
+        status: 'completed',
+        cached: true,
+        hit_count: 2,
+        evidence_count: 1,
+        top_hits: [
+          {
+            hit_rank: 1,
+            accession: 'ABC123',
+            title: 'Example protein alpha',
+            organism: 'Testus organismus',
+            bit_score: 55,
+            e_value: 1e-20,
+          },
+          {
+            hit_rank: 2,
+            accession: 'XYZ789',
+            title: 'Example protein beta',
+            organism: 'Testus organismus',
+            bit_score: 40,
+            e_value: 1e-10,
+          },
+        ],
+        evidence_summary: {
+          document_count: 1,
+          packet: {
+            documents: [
+              {
+                evidence_id: 'ev-1',
+                hit_rank: 1,
+                title: 'Example evidence',
+                content_text: 'BLAST hit #1 ABC123 Example protein alpha',
+                source_system: 'ncbi_blast',
+                source_id: 'ABC123',
+              },
+            ],
+          },
+        },
+        manifest_refs: [
+          {
+            manifest_id: 'retrieval_abc123_parquet',
+            uri: 'retrieval-manifest://retrieval_abc123_parquet',
+          },
+        ],
+      },
+    },
+    results: {
+      ...makeCompletedJob().results,
+      retrieval: {
+        request_id: 'retrieval_abc123',
+        provider: 'ncbi_blast_remote',
+        status: 'completed',
+        cached: true,
+        hit_count: 2,
+        evidence_count: 1,
+        top_hits: [
+          {
+            hit_rank: 1,
+            accession: 'ABC123',
+            title: 'Example protein alpha',
+            organism: 'Testus organismus',
+            bit_score: 55,
+            e_value: 1e-20,
+          },
+        ],
+        evidence_summary: {
+          document_count: 1,
+          packet: {
+            documents: [
+              {
+                evidence_id: 'ev-1',
+                hit_rank: 1,
+                title: 'Example evidence',
+                content_text: 'BLAST hit #1 ABC123 Example protein alpha',
+                source_system: 'ncbi_blast',
+                source_id: 'ABC123',
+              },
+            ],
+          },
+        },
+        manifest_refs: [
+          {
+            manifest_id: 'retrieval_abc123_parquet',
+            uri: 'retrieval-manifest://retrieval_abc123_parquet',
+          },
+        ],
+      },
+    },
+  }
+}
+
 function makeAnalysisJob() {
   return {
     ...makeCompletedJob(),
@@ -145,6 +250,37 @@ test.describe('Results viewer', () => {
     await page.getByRole('button', { name: /Download All Results/i }).click()
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/job_completed_0_results\.json$/)
+  })
+
+  test('renders BLAST grounding evidence and resource preview actions', async ({ page }) => {
+    const job = makeCompletedJobWithRetrieval()
+    await installCompletedJobRoutes(page, job)
+    await page.route('**/api/mcp/resources/read', async (route) => {
+      await jsonRoute(route, {
+        contents: [
+          {
+            uri: 'retrieval://retrieval_abc123',
+            mimeType: 'application/json',
+            text: '{"request_id":"retrieval_abc123","status":"completed"}',
+          },
+        ],
+      })
+    })
+
+    await page.goto('/')
+    await openCompletedJob(page)
+
+    await expect(page.getByText('BLAST Grounding Evidence')).toBeVisible()
+    await expect(page.getByText('Top homologs')).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'ABC123' })).toBeVisible()
+    await expect(page.getByText('Evidence packet')).toBeVisible()
+    await expect(page.getByText('Example evidence')).toBeVisible()
+    await expect(page.getByText('Dataset manifests')).toBeVisible()
+    await expect(page.getByText('retrieval_abc123_parquet')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Open retrieval resource' }).click()
+    await expect(page.getByText('Resource preview')).toBeVisible()
+    await expect(page.getByText('retrieval://retrieval_abc123')).toBeVisible()
   })
 
   test('iterate from a completed job pre-fills the input form', async ({ page }) => {

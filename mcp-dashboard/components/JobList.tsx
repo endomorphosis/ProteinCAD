@@ -104,6 +104,23 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
     }
   }
 
+  const getRetrievalTone = (status?: string) => {
+    switch (status) {
+      case 'cached':
+      case 'completed':
+        return 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
+      case 'running':
+      case 'queued':
+        return 'border-sky-400/20 bg-sky-400/10 text-sky-200'
+      case 'failed':
+        return 'border-rose-400/20 bg-rose-400/10 text-rose-200'
+      case 'disabled':
+        return 'border-amber-400/20 bg-amber-400/10 text-amber-200'
+      default:
+        return 'border-white/10 bg-white/5 text-slate-300'
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-white/10 bg-slate-950/30">
@@ -188,6 +205,21 @@ export default function JobList({ refreshTrigger, onJobSelected }: Props) {
                   </div>
                   <p className="mt-1 text-xs text-slate-400">{new Date(job.created_at).toLocaleString()}</p>
                   <p className="mt-2 truncate text-xs text-slate-500">{job.job_id}</p>
+                  {job.retrieval?.requested && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className={`rounded-full border px-2 py-0.5 font-semibold ${getRetrievalTone(job.retrieval?.status)}`}>
+                        BLAST {job.retrieval?.status || 'queued'}
+                      </span>
+                      {typeof job.retrieval?.hit_count === 'number' && (
+                        <span className="rounded-full bg-white/5 px-2 py-0.5 text-slate-300">
+                          {job.retrieval.hit_count} hits
+                        </span>
+                      )}
+                      {job.retrieval?.cached === true && (
+                        <span className="rounded-full bg-white/5 px-2 py-0.5 text-slate-300">cache hit</span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={(e) => handleDelete(job.job_id, e)}

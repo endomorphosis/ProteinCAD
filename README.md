@@ -218,6 +218,23 @@ POST /api/config/reset           Reset to defaults
 
 Config is persisted to `MCP_CONFIG_PATH` (mounted under `/config/` in compose stacks). Set `MCP_CONFIG_READONLY=1` to prevent runtime changes.
 
+### BLAST retrieval + grounding (DuckDB-first)
+
+ProteinCAD includes BLAST retrieval integration with `https://blast.ncbi.nlm.nih.gov/Blast.cgi` as the default provider and DuckDB as the default retrieval store/cache.
+
+```
+POST /api/retrieval/requests            Submit retrieval query
+GET  /api/retrieval/requests/{id}       Read normalized retrieval bundle
+GET  /api/retrieval/cache               List cached retrieval entries
+```
+
+Dashboard support includes:
+- Backend settings for BLAST retrieval feature flags and defaults
+- Per-job opt-in toggle to ground design runs with BLAST evidence
+- Job-level retrieval status and results evidence panels (top homologs, evidence packet, manifest refs)
+
+`ipfs-datasets-py` remains optional and should only be used for non-BLAST ETL/packaging/publication workflows.
+
 ### Jobs
 
 ```
