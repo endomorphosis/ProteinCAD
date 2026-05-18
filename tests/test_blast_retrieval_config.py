@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import duckdb
 import httpx
@@ -237,7 +237,7 @@ def test_local_blast_provider_resolves_database_and_parses_hits(tmp_path):
 
     captured: Dict[str, object] = {}
 
-    def runner(command, fasta_query, timeout_seconds):
+    def runner(command: List[str], fasta_query: str, timeout_seconds: float):
         captured["command"] = list(command)
         captured["fasta_query"] = fasta_query
         captured["timeout_seconds"] = timeout_seconds
@@ -266,7 +266,7 @@ def test_local_blast_provider_fails_when_database_is_missing(tmp_path):
     cfg.retrieval.blast.default_database = "missing_db"
     Path(cfg.retrieval.blast.local_database_dir).mkdir(parents=True, exist_ok=True)
 
-    def runner(command, fasta_query, timeout_seconds):
+    def runner(command: List[str], fasta_query: str, timeout_seconds: float):
         raise AssertionError("Local BLAST runner should not be called when database resolution fails")
 
     provider = LocalBlastProvider(config=cfg.retrieval, command_runner=runner)

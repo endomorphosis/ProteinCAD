@@ -341,7 +341,7 @@ def supervise_daemon(args: argparse.Namespace) -> int:
                 log_path=str(log_file),
             )
 
-            # Binary append keeps raw subprocess stream bytes intact across restarts.
+            # Binary append avoids implicit encoding/newline conversions when appending child output.
             with log_file.open("ab") as handle:
                 child = subprocess.Popen(
                     cmd,

@@ -25,6 +25,7 @@ _RTOE_RE = re.compile(r"RTOE\s*=\s*(\d+)")
 _HITS_RE = re.compile(r"ThereAreHits=(yes|no)", re.IGNORECASE)
 _ORGANISM_SUFFIX_RE = re.compile(r"\s*\[([^\]]+)\]\s*$")
 _LOCAL_BLAST_INDEX_SUFFIXES = (".pin", ".phr", ".psq", ".nin", ".nhr", ".nsq")
+_MAX_LOCAL_BLAST_ERROR_DETAIL_CHARS = 800
 
 
 class RetrievalError(RuntimeError):
@@ -390,7 +391,11 @@ class LocalBlastProvider(RetrievalProvider):
         )
         stderr = (completed.stderr or "").strip()
         if completed.returncode != 0:
-            detail = stderr[-800:] if stderr else f"exit code {completed.returncode}"
+            detail = (
+                stderr[-_MAX_LOCAL_BLAST_ERROR_DETAIL_CHARS :]
+                if stderr
+                else f"exit code {completed.returncode}"
+            )
             raise RetrievalUpstreamError(f"Local BLAST command failed: {detail}")
 
         raw_result = (completed.stdout or "").strip()
@@ -529,10 +534,14 @@ def serialize_alignments(alignments: List[BlastAlignment]) -> List[Dict[str, Any
     return [asdict(alignment) for alignment in alignments]
 
 
-def _local_database_prefix_exists(prefix: Path) -> bool:
+def _blast_database_files_exist(prefix: Path) -> bool:
     if prefix.exists():
         return True
     return any(prefix.with_suffix(suffix).exists() for suffix in _LOCAL_BLAST_INDEX_SUFFIXES)
+
+
+def _matches_database_name(discovered: Path, candidate: str) -> bool:
+    return discovered.stem == candidate or discovered.name.startswith(f"{candidate}.")
 
 
 def resolve_local_database(database: str, config: RetrievalConfig) -> str:
@@ -545,7 +554,7 @@ def resolve_local_database(database: str, config: RetrievalConfig) -> str:
 
     candidate_path = Path(candidate).expanduser()
     if candidate_path.is_absolute():
-        if _local_database_prefix_exists(candidate_path):
+        if _blast_database_files_exist(candidate_path):
             return str(candidate_path)
         raise RetrievalConfigError(f"Local BLAST database path does not exist: {candidate_path}")
 
@@ -555,12 +564,11 @@ def resolve_local_database(database: str, config: RetrievalConfig) -> str:
         if not root_path.exists():
             raise RetrievalConfigError(f"Local BLAST database directory does not exist: {root_path}")
         prefixed_candidate = root_path / candidate
-        if _local_database_prefix_exists(prefixed_candidate):
+        if _blast_database_files_exist(prefixed_candidate):
             return str(prefixed_candidate)
         discovery_glob = (config.blast.local_database_glob or "").strip() or "*.pin"
         for discovered in sorted(root_path.glob(discovery_glob)):
-            stem = discovered.stem
-            if stem != candidate and not discovered.name.startswith(f"{candidate}."):
+            if not _matches_database_name(discovered, candidate):
                 continue
             if discovered.suffix in _LOCAL_BLAST_INDEX_SUFFIXES:
                 return str(discovered.with_suffix(""))
@@ -569,7 +577,7 @@ def resolve_local_database(database: str, config: RetrievalConfig) -> str:
             f"Local BLAST database '{candidate}' not found in {root_path} using glob '{discovery_glob}'"
         )
 
-    if _local_database_prefix_exists(candidate_path):
+    if _blast_database_files_exist(candidate_path):
         return str(candidate_path)
     raise RetrievalConfigError(
         "Local BLAST database could not be resolved; set retrieval.blast.local_database_dir "
