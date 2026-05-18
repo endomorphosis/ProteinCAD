@@ -341,7 +341,7 @@ def supervise_daemon(args: argparse.Namespace) -> int:
                 log_path=str(log_file),
             )
 
-            # Binary append avoids implicit encoding/newline conversions when appending child output.
+            # Open log in binary append mode because child stdout/stderr are redirected as raw process streams.
             with log_file.open("ab") as handle:
                 child = subprocess.Popen(
                     cmd,
