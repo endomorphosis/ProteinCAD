@@ -129,6 +129,8 @@ To unblock the first implementation slice, use these defaults unless project req
 - default max poll attempts: `60`
 - default request timeout: `30` seconds
 - default DuckDB file: `MCP_RETRIEVAL_DUCKDB_PATH` or `MCP_RETRIEVAL_DATA_DIR/blast_retrieval.duckdb`
+- local BLAST binary default: reuse selected BLAST program unless `MCP_RETRIEVAL_LOCAL_BLAST_BINARY` is set
+- local BLAST database discovery: `MCP_RETRIEVAL_LOCAL_DATABASE_DIR` + `MCP_RETRIEVAL_LOCAL_DATABASE_GLOB` (default `*.pin`)
 
 These defaults should remain configurable through runtime config and environment overrides, but they are now the canonical bootstrap values for Milestone 0.
 

@@ -282,6 +282,10 @@ def _apply_retrieval_env_overrides(cfg: "MCPServerConfig") -> bool:
             "MCP_RETRIEVAL_REMOTE_BASE_URL": ("blast", "remote_base_url"),
             "MCP_RETRIEVAL_PROGRAM": ("blast", "default_program"),
             "MCP_RETRIEVAL_DATABASE": ("blast", "default_database"),
+            "MCP_RETRIEVAL_LOCAL_BLAST_BINARY": ("blast", "local_blast_binary"),
+            "MCP_RETRIEVAL_LOCAL_DATABASE": ("blast", "local_database"),
+            "MCP_RETRIEVAL_LOCAL_DATABASE_DIR": ("blast", "local_database_dir"),
+            "MCP_RETRIEVAL_LOCAL_DATABASE_GLOB": ("blast", "local_database_glob"),
             "MCP_RETRIEVAL_DUCKDB_PATH": ("storage", "duckdb_path"),
             "MCP_RETRIEVAL_PARQUET_DIR": ("storage", "parquet_export_dir"),
             "MCP_RETRIEVAL_RAW_PAYLOAD_DIR": ("storage", "raw_payload_dir"),
@@ -481,6 +485,10 @@ class RetrievalBlastConfig(BaseModel):
     remote_base_url: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_REMOTE_BASE_URL") or "").strip() or "https://blast.ncbi.nlm.nih.gov/Blast.cgi")
     default_program: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_PROGRAM") or "").strip() or "blastp")
     default_database: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_DATABASE") or "").strip() or "swissprot")
+    local_blast_binary: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_LOCAL_BLAST_BINARY") or "").strip() or "")
+    local_database: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_LOCAL_DATABASE") or "").strip() or "")
+    local_database_dir: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_LOCAL_DATABASE_DIR") or "").strip() or "")
+    local_database_glob: str = Field(default_factory=lambda: (os.getenv("MCP_RETRIEVAL_LOCAL_DATABASE_GLOB") or "").strip() or "*.pin")
     default_hitlist_size: int = Field(default_factory=lambda: max(1, _env_int("MCP_RETRIEVAL_HITLIST_SIZE", 25)))
     max_hitlist_size: int = Field(default_factory=lambda: max(1, _env_int("MCP_RETRIEVAL_MAX_HITLIST_SIZE", 100)))
     poll_interval_seconds: float = Field(default_factory=lambda: max(1.0, _env_float("MCP_RETRIEVAL_POLL_INTERVAL_S", 5.0)))

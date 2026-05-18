@@ -7,9 +7,12 @@ import asyncio
 import hashlib
 import json
 import re
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from uuid import uuid4
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -21,6 +24,7 @@ _RID_RE = re.compile(r"RID\s*=\s*([A-Z0-9-]+)")
 _RTOE_RE = re.compile(r"RTOE\s*=\s*(\d+)")
 _HITS_RE = re.compile(r"ThereAreHits=(yes|no)", re.IGNORECASE)
 _ORGANISM_SUFFIX_RE = re.compile(r"\s*\[([^\]]+)\]\s*$")
+_LOCAL_BLAST_INDEX_SUFFIXES = (".pin", ".phr", ".psq", ".nin", ".nhr", ".nsq")
 
 
 class RetrievalError(RuntimeError):
@@ -323,20 +327,86 @@ class RetrievalProvider(ABC):
         return await self.collect_results(query, submission)
 
 
-class LocalBlastPlaceholderProvider(RetrievalProvider):
+class LocalBlastProvider(RetrievalProvider):
+    """Run BLAST+ locally using configured binary/database discovery rules."""
+
+    def __init__(
+        self,
+        *,
+        config: RetrievalConfig,
+        command_runner: Optional[Callable[[List[str], str, float], subprocess.CompletedProcess[str]]] = None,
+    ) -> None:
+        self._config = config
+        self._command_runner = command_runner or _run_local_blast_command
+
     @property
     def provider_name(self) -> str:
         return "local_blast"
 
     async def submit(self, query: BlastRetrievalQuery) -> BlastSubmission:
-        raise RetrievalConfigError("Local BLAST provider is not implemented yet")
+        return BlastSubmission(
+            remote_request_id=f"local_{uuid4().hex}",
+            remote_queue_hint_seconds=0,
+            raw_submission=json.dumps(
+                {
+                    "provider": self.provider_name,
+                    "program": query.program,
+                    "database": query.database,
+                    "hitlist_size": query.hitlist_size,
+                },
+                sort_keys=True,
+            ),
+        )
 
     async def collect_results(
         self,
         query: BlastRetrievalQuery,
         submission: BlastSubmission,
     ) -> ProviderExecutionResult:
-        raise RetrievalConfigError("Local BLAST provider is not implemented yet")
+        database_path = resolve_local_database(query.database, self._config)
+        binary = (self._config.blast.local_blast_binary or "").strip() or query.program
+        if not binary:
+            raise RetrievalConfigError("Local BLAST binary is not configured")
+
+        command = [
+            binary,
+            "-db",
+            database_path,
+            "-query",
+            "-",
+            "-outfmt",
+            "5",
+            "-num_descriptions",
+            str(query.hitlist_size),
+            "-num_alignments",
+            str(query.hitlist_size),
+        ]
+        fasta_query = f">query\n{query.normalized_sequence}\n"
+        completed = await asyncio.to_thread(
+            self._command_runner,
+            command,
+            fasta_query,
+            query.request_timeout_seconds,
+        )
+        stderr = (completed.stderr or "").strip()
+        if completed.returncode != 0:
+            detail = stderr[-800:] if stderr else f"exit code {completed.returncode}"
+            raise RetrievalUpstreamError(f"Local BLAST command failed: {detail}")
+
+        raw_result = (completed.stdout or "").strip()
+        if not raw_result:
+            raise RetrievalProtocolError("Local BLAST command returned empty output")
+
+        hits, alignments = parse_blast_xml(raw_result, query_length=len(query.normalized_sequence))
+        return ProviderExecutionResult(
+            provider_name=self.provider_name,
+            cache_key=build_cache_key(query),
+            submission=submission,
+            raw_result=raw_result,
+            hits=hits,
+            alignments=alignments,
+            search_info_history=[submission.raw_submission],
+        )
 
 
 class NCBIBlastRemoteProvider(RetrievalProvider):
@@ -444,10 +514,11 @@ def provider_from_config(
     *,
     transport: Optional[httpx.AsyncBaseTransport] = None,
     sleeper: Optional[Callable[[float], Awaitable[None]]] = None,
+    local_command_runner: Optional[Callable[[List[str], str, float], subprocess.CompletedProcess[str]]] = None,
 ) -> RetrievalProvider:
     if config.provider == "ncbi_blast_remote":
         return NCBIBlastRemoteProvider(transport=transport, sleeper=sleeper)
-    return LocalBlastPlaceholderProvider()
+    return LocalBlastProvider(config=config, command_runner=local_command_runner)
 
 
 def serialize_hits(hits: List[BlastHit]) -> List[Dict[str, Any]]:
@@ -456,3 +527,67 @@ def serialize_hits(hits: List[BlastHit]) -> List[Dict[str, Any]]:
 
 def serialize_alignments(alignments: List[BlastAlignment]) -> List[Dict[str, Any]]:
     return [asdict(alignment) for alignment in alignments]
+
+
+def _local_database_prefix_exists(prefix: Path) -> bool:
+    if prefix.exists():
+        return True
+    return any(prefix.with_suffix(suffix).exists() for suffix in _LOCAL_BLAST_INDEX_SUFFIXES)
+
+
+def resolve_local_database(database: str, config: RetrievalConfig) -> str:
+    candidate = (database or "").strip()
+    if not candidate:
+        fallback = (config.blast.local_database or "").strip()
+        candidate = fallback or (config.blast.default_database or "").strip()
+    if not candidate:
+        raise RetrievalConfigError("Local BLAST database is not configured")
+
+    candidate_path = Path(candidate).expanduser()
+    if candidate_path.is_absolute():
+        if _local_database_prefix_exists(candidate_path):
+            return str(candidate_path)
+        raise RetrievalConfigError(f"Local BLAST database path does not exist: {candidate_path}")
+
+    search_root = (config.blast.local_database_dir or "").strip()
+    if search_root:
+        root_path = Path(search_root).expanduser()
+        if not root_path.exists():
+            raise RetrievalConfigError(f"Local BLAST database directory does not exist: {root_path}")
+        prefixed_candidate = root_path / candidate
+        if _local_database_prefix_exists(prefixed_candidate):
+            return str(prefixed_candidate)
+        discovery_glob = (config.blast.local_database_glob or "").strip() or "*.pin"
+        for discovered in sorted(root_path.glob(discovery_glob)):
+            stem = discovered.stem
+            if stem != candidate and not discovered.name.startswith(f"{candidate}."):
+                continue
+            if discovered.suffix in _LOCAL_BLAST_INDEX_SUFFIXES:
+                return str(discovered.with_suffix(""))
+            return str(discovered)
+        raise RetrievalConfigError(
+            f"Local BLAST database '{candidate}' not found in {root_path} using glob '{discovery_glob}'"
+        )
+
+    if _local_database_prefix_exists(candidate_path):
+        return str(candidate_path)
+    raise RetrievalConfigError(
+        "Local BLAST database could not be resolved; set retrieval.blast.local_database_dir "
+        "or use an absolute local database path"
+    )
+
+
+def _run_local_blast_command(
+    command: List[str],
+    fasta_query: str,
+    timeout_seconds: float,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        input=fasta_query,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=max(1.0, float(timeout_seconds)),
+        check=False,
+    )

@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
@@ -86,10 +87,16 @@ class BlastRetrievalService:
         store: RetrievalStore,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         sleeper: Optional[Callable[[float], Awaitable[None]]] = None,
+        local_command_runner: Optional[Callable[[List[str], str, float], subprocess.CompletedProcess[str]]] = None,
     ) -> None:
         self._config = config
         self._store = store
-        self._provider = provider_from_config(config, transport=transport, sleeper=sleeper)
+        self._provider = provider_from_config(
+            config,
+            transport=transport,
+            sleeper=sleeper,
+            local_command_runner=local_command_runner,
+        )
 
     async def retrieve(
         self,

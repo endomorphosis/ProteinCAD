@@ -26,23 +26,23 @@ If the snapshot is stale, update it before starting implementation work.
 ## Supervisor Snapshot
 
 - **Project**: BLAST-backed retrieval-augmented generation for ProteinCAD
-- **Status**: Milestone 4 complete; stabilization plus Milestone 5 bridge scaffolding in progress
+- **Status**: Milestone 4 complete; Milestone 5 local provider + bridge scaffolding in progress
 - **Default storage direction**: DuckDB first, Parquet for export, `ipfs_datasets_py` optional for ETL
 - **Current milestone**: Milestone 5 (initial slice) in progress
-- **Next in-progress task**: Add local BLAST+ provider support after retrieval contract hardening
+- **Next in-progress task**: Add export/import path for retrieval data as Parquet bundles
 - **Primary edit targets**:
-  - `mcp-server/retrieval_provider.py`
-  - `mcp-server/runtime_config.py`
+  - `mcp-server/retrieval_store.py`
+  - `mcp-server/retrieval_service.py`
   - `mcp-server/retrieval_bridge_daemon.py`
-  - `scripts/retrieval/ensure_ipfs_bridge_supervisor.sh`
+  - `tests/test_blast_retrieval_config.py`
   - `docs/BLAST_RAG_TODO.md`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Open decisions blocking deeper implementation**:
   - none
 - **Recommended first implementation slice**:
-  1. finish local BLAST+ provider interface/config so remote and local providers share one contract
+  1. add explicit export/import workflows for Parquet retrieval bundles
   2. wire queued bridge requests from retrieval manifests into the ipfs bridge daemon command templates
-  3. keep IPFS publication fields optional until a concrete publication workflow is validated
+  3. add optional CID/CAR manifest fields without making IPFS publication mandatory
 
 Update this snapshot at the end of every meaningful session so a future Copilot run can resume immediately.
 
@@ -159,8 +159,8 @@ Goal: expose retrieval controls and evidence visually.
 
 Goal: support reproducible offline workflows after the remote path is stable.
 
-- [ ] Add local BLAST+ provider interface
-- [ ] Define local database configuration and discovery rules
+- [x] Add local BLAST+ provider interface
+- [x] Define local database configuration and discovery rules
 - [ ] Add export/import path for retrieval data as Parquet bundles
 - [x] Add optional `ipfs_datasets_py` bridge scripts for scraping/transformation workflows
 - [ ] Add optional manifest fields for IPFS CID/CAR references
@@ -180,8 +180,9 @@ If a new session needs an unambiguous place to start, work top-down through this
 1. [x] Decide whether BLAST grounding stays opt-in when MCP endpoints/resources ship
 2. [x] Add dashboard tests for retrieval settings and evidence rendering
 3. [x] Harden retrieval contract/evidence wiring based on dashboard and MCP feedback
-4. [ ] Add local BLAST+ provider support after the remote evidence path is stable
-5. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
+4. [x] Add local BLAST+ provider support after the remote evidence path is stable
+5. [ ] Add export/import path for retrieval data as Parquet bundles
+6. [x] Add optional `ipfs_datasets_py` bridge scripts only after a non-BLAST ETL source requires them (daemon/supervisor scaffolding landed)
 
 ---
 
@@ -189,16 +190,17 @@ If a new session needs an unambiguous place to start, work top-down through this
 
 Use this block at the end of each Copilot session. Replace the placeholders instead of appending prose elsewhere.
 
-- **Last completed task**: land retrieval resource normalization hardening plus optional ipfs bridge daemon/supervisor scripts
-- **Next recommended task**: add local BLAST+ provider interface/config and connect manifest-triggered bridge requests
+- **Last completed task**: implement local BLAST+ provider execution plus runtime config/discovery rules
+- **Next recommended task**: add Parquet retrieval export/import workflows and optional manifest CID/CAR fields
 - **Files to open first next time**:
   - `docs/BLAST_RAG_TODO.md`
   - `mcp-server/retrieval_provider.py`
   - `mcp-server/runtime_config.py`
+  - `mcp-server/retrieval_store.py`
+  - `mcp-server/retrieval_service.py`
   - `mcp-server/retrieval_bridge_daemon.py`
+  - `tests/test_blast_retrieval_config.py`
   - `tests/test_retrieval_bridge_daemon.py`
-  - `mcp-dashboard/components/ResultsViewer.tsx`
-  - `scripts/retrieval/ensure_ipfs_bridge_supervisor.sh`
   - `docs/BLAST_RAG_INTEGRATION_PLAN.md`
 - **Known blockers**:
   - none

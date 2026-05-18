@@ -3,18 +3,25 @@
 import asyncio
 import importlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, Dict, Tuple
 
 import duckdb
 import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mcp-server"))
 mcp_server_module = importlib.import_module("server")
 
-from retrieval_provider import parse_submission_response
+from retrieval_provider import (
+    LocalBlastProvider,
+    RetrievalConfigError,
+    build_query_from_config,
+    parse_submission_response,
+)
 from retrieval_service import BlastRetrievalService
 from retrieval_store import RetrievalStore
 from runtime_config import MCPServerConfig, RuntimeConfigManager
@@ -139,6 +146,10 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_RETRIEVAL_HITLIST_SIZE", "40")
     monkeypatch.setenv("MCP_RETRIEVAL_MAX_POLL_ATTEMPTS", "12")
     monkeypatch.setenv("MCP_RETRIEVAL_EXPORT_PARQUET", "true")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_BLAST_BINARY", "/usr/local/bin/blastp")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE", "swissprot_local")
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE_DIR", str(tmp_path / "blast-data" / "databases"))
+    monkeypatch.setenv("MCP_RETRIEVAL_LOCAL_DATABASE_GLOB", "*.pin")
 
     cfg = MCPServerConfig()
     manager = RuntimeConfigManager(path=str(tmp_path / "config.json"))
@@ -152,6 +163,10 @@ def test_retrieval_env_overrides_apply_to_runtime_config(tmp_path, monkeypatch):
     assert retrieval.provider == "local_blast"
     assert retrieval.blast.default_program == "blastx"
     assert retrieval.blast.default_database == "nr"
+    assert retrieval.blast.local_blast_binary == "/usr/local/bin/blastp"
+    assert retrieval.blast.local_database == "swissprot_local"
+    assert Path(retrieval.blast.local_database_dir) == tmp_path / "blast-data" / "databases"
+    assert retrieval.blast.local_database_glob == "*.pin"
     assert retrieval.blast.default_hitlist_size == 40
     assert retrieval.blast.max_poll_attempts == 12
     assert Path(retrieval.storage.data_dir) == tmp_path / "blast-data"
@@ -206,6 +221,59 @@ def test_parse_submission_response_extracts_rid_and_rtoe():
 
     assert submission.remote_request_id == "TEST123"
     assert submission.remote_queue_hint_seconds == 7
+
+
+def test_local_blast_provider_resolves_database_and_parses_hits(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.provider = "local_blast"
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.blast.local_blast_binary = "blastp-local"
+    cfg.retrieval.blast.local_database_dir = str(tmp_path / "blastdb")
+    cfg.retrieval.blast.local_database_glob = "*.pin"
+    cfg.retrieval.blast.default_database = "swissprot_local"
+    db_dir = Path(cfg.retrieval.blast.local_database_dir)
+    db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "swissprot_local.pin").write_text("", encoding="utf-8")
+
+    captured: Dict[str, object] = {}
+
+    def runner(command, fasta_query, timeout_seconds):
+        captured["command"] = list(command)
+        captured["fasta_query"] = fasta_query
+        captured["timeout_seconds"] = timeout_seconds
+        return subprocess.CompletedProcess(command, 0, MOCK_BLAST_XML, "")
+
+    provider = LocalBlastProvider(config=cfg.retrieval, command_runner=runner)
+    query = build_query_from_config(TEST_FASTA_QUERY, cfg.retrieval)
+    submission = asyncio.run(provider.submit(query))
+    result = asyncio.run(provider.collect_results(query, submission))
+
+    assert result.provider_name == "local_blast"
+    assert len(result.hits) == 1
+    assert captured["command"][0] == "blastp-local"
+    assert "-db" in captured["command"]
+    db_arg_index = captured["command"].index("-db") + 1
+    assert captured["command"][db_arg_index] == str(db_dir / "swissprot_local")
+    assert str(captured["fasta_query"]).startswith(">query")
+
+
+def test_local_blast_provider_fails_when_database_is_missing(tmp_path):
+    cfg = MCPServerConfig()
+    cfg.retrieval.provider = "local_blast"
+    cfg.retrieval.feature_flags.enabled = True
+    cfg.retrieval.blast.local_blast_binary = "blastp-local"
+    cfg.retrieval.blast.local_database_dir = str(tmp_path / "blastdb")
+    cfg.retrieval.blast.default_database = "missing_db"
+    Path(cfg.retrieval.blast.local_database_dir).mkdir(parents=True, exist_ok=True)
+
+    def runner(command, fasta_query, timeout_seconds):
+        raise AssertionError("Local BLAST runner should not be called when database resolution fails")
+
+    provider = LocalBlastProvider(config=cfg.retrieval, command_runner=runner)
+    query = build_query_from_config(TEST_FASTA_QUERY, cfg.retrieval)
+    submission = asyncio.run(provider.submit(query))
+    with pytest.raises(RetrievalConfigError, match="not found"):
+        asyncio.run(provider.collect_results(query, submission))
 
 
 def test_remote_retrieval_service_persists_hits_alignments_and_cache(tmp_path):
